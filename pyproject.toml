@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+exclude = [".venv", "**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length is enforced by the formatter, not the linter
+    "B008",  # Django field definitions legitimately call functions in defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]

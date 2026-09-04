@@ -1,0 +1,304 @@
+/* =========================================================================
+   MaxPay — the embedded client surface
+   -------------------------------------------------------------------------
+   This is not the internal panel. It renders inside someone else's page, in a
+   frame whose height we do not control, and it has to sit quietly next to
+   B2CORE's own chrome rather than compete with it. So: one centred card, no
+   navigation, no page furniture.
+
+   The identity, fixed:
+
+     one accent, Cairo, Arabic RTL, mobile first. No gradient anywhere, no
+     second brand hue, no ornament.
+
+   Everything chromatic on this surface is that one accent. It marks exactly
+   three things: the primary action, the value being read back to the client
+   (a wallet number, a reference), and progress. A screen where more than one
+   thing glows is a screen where nothing does.
+
+   **The ground is not ours.** B2CORE's room is painted light or dark by the
+   client, and this frame sits inside it, so the portal states no page
+   background at all and inherits whatever the room is. What it does own is
+   the card on top of that ground, and the card follows the room: the palette
+   forks on `data-theme`, which the handshake writes onto <html> from
+   `embed-theme-change` (spec §4, step 6). Light is the default, because it is
+   what the client sees in the moment before the host has said anything.
+
+   That is the one place this surface departs from the panels. They are pages
+   of their own on a black ground and stay dark-only; system.css carries that
+   palette and both of them load it unchanged. The fork below is loaded by
+   this surface alone.
+
+   The palette, the typeface and the reset are in static/css/system.css, which
+   this page loads first; what is below is this surface alone. Self-contained
+   either way: the policy this page ships under is `default-src 'self'`
+   (spec §11), so there is no CDN and no third-party request anywhere.
+   ========================================================================= */
+
+/* The palette, the typeface and the reset live in system.css, which every
+   surface loads first. What stays here is this surface's own measure.
+
+   The client portal is a phone surface inside somebody else's frame, so it
+   asks for more room than the panels do: a softer corner, and a target sized
+   for a thumb at arm's length rather than a mouse. */
+:root {
+  --radius:    14px;
+  --radius-sm: 10px;
+
+  /* One thumb, one hand, on a phone held at arm's length. Every control that
+     can be pressed clears this. */
+  --tap: 3rem;
+}
+
+/* --- light, and the fork -------------------------------------------------
+   system.css declares the dark palette on `:root` and all three surfaces load
+   it. Here it is overridden for light, and the selector is the requirement
+   written down: light applies *unless* the host has explicitly said dark.
+
+     no attribute      light   — the frame before any message has arrived
+     data-theme=light  light
+     data-theme=dark   dark    — system.css, untouched
+
+   Written as an override of dark rather than as two symmetric blocks so the
+   dark values keep living in exactly one file. Restating them here would mean
+   a change to the shared palette silently stopped reaching this surface.
+
+   No `prefers-color-scheme` anywhere: the room decides, not the operating
+   system. A client on a dark phone looking at a light B2CORE must get the
+   light frame, and the host tells us which it is.
+
+   Every colour token system.css defines is forked, including `--accent-row`,
+   which this surface does not currently spend. A partial fork is a trap: the
+   first rule that reaches for a token nobody remembered gets a black-ground
+   value on a white card, and nobody sees it until it ships. */
+:root:not([data-theme="dark"]) {
+  /* `--bg` is no longer the page — nothing paints the page. It stays the
+     identity's ground colour, which on this surface is spent on the one thing
+     that must read as *inset* into the card: a form field. Below white, so a
+     field still looks like a well rather than a rectangle of card. */
+  --bg:        #eef1f1;
+  --surface:   #ffffff;
+  --surface-2: #f3f6f6;
+
+  --line:   #dde4e3;
+  --line-2: #c4cecd;
+
+  --ink:   #0b1211;
+  --ink-2: #4a5654;
+  --ink-3: #66716f;
+
+  /* The accent is the one token that cannot simply be inverted. #19FFFD is a
+     glow, and a glow needs a dark ground: as text on white it lands at about
+     1.2:1, which is not a contrast failure so much as an invisible wallet
+     number. So light gets the same hue taken down to a readable value —
+     5.6:1 on the card, AA at every size we set it in — and it is still the
+     only hue on the surface. One accent, two grounds.
+
+     `--accent-ink` flips with it: near-black sits on a neon fill, white sits
+     on this one. Both are the same rule — whatever the fill is, the label on
+     top of it is the far end of the scale. */
+  --accent:      #0a7472;
+  --accent-ink:  #ffffff;
+  --accent-wash: rgba(10, 116, 114, .08);
+  --accent-edge: rgba(10, 116, 114, .38);
+  --accent-row:  rgba(10, 116, 114, .05);
+
+  /* Held to the same reading: #ff5b57 is calibrated for black. */
+  --danger:      #c62f2b;
+  --danger-wash: rgba(198, 47, 43, .10);
+}
+
+/* --- the ground we do not paint -----------------------------------------
+   system.css paints `html` for the panels, which are pages. This one is not a
+   page: it is a frame inside B2CORE's room, and the room's ground has to come
+   through. Both the root and the body are cleared, because the canvas takes
+   its colour from the root and falls back to the body — leaving either one
+   filled would put an opaque rectangle over the host.
+
+   This is also why `color-scheme` is set on the body rather than on the root
+   below: on the root it changes the UA's *canvas* colour, and a dark
+   color-scheme would repaint the frame black underneath everything, which is
+   exactly the rectangle these two rules exist to remove. On the body it does
+   the job it is wanted for — native controls, the caret and autofill follow
+   the room — and touches nothing else. */
+html { background: transparent; }
+
+body.embed {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: transparent;
+  color-scheme: light;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.85;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme="dark"] body.embed { color-scheme: dark; }
+
+@media (min-width: 30rem) {
+  body.embed { padding: 1.75rem; }
+}
+
+.embed__stage {
+  width: 100%;
+  max-width: 30rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.card {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2.4rem 1.6rem 2rem;
+  text-align: center;
+}
+
+@media (min-width: 30rem) {
+  .card { padding: 2.6rem 2rem 2.2rem; }
+}
+
+/* The monogram. A ring rather than a disc: the filled accent belongs to the
+   copy button and the submit button, and spending it here would flatten the
+   difference between a mark and an action. */
+.card__mark {
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 1.2rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent-edge);
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: .95rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1;
+  /* The monogram is Latin inside an RTL page. */
+  direction: ltr;
+}
+
+.card__title {
+  margin: 0 0 .9rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: -.01em;
+}
+
+/* --- one panel per handshake state ------------------------------------- */
+
+.panel { display: none; }
+
+#embed-stage[data-state="connecting"]   .panel[data-for="connecting"],
+#embed-stage[data-state="ready"]        .panel[data-for="ready"],
+#embed-stage[data-state="error"]        .panel[data-for="error"],
+#embed-stage[data-state="logged-out"]   .panel[data-for="logged-out"],
+#embed-stage[data-state="standalone"]   .panel[data-for="standalone"],
+#embed-stage[data-state="unconfigured"] .panel[data-for="unconfigured"] {
+  display: block;
+}
+
+.panel__lead {
+  margin: 0 0 .5rem;
+  color: var(--ink);
+}
+
+.panel__note {
+  margin: .35rem 0 0;
+  font-size: .9rem;
+  color: var(--ink-2);
+}
+
+.panel__note--muted { color: var(--ink-3); }
+
+/* --- the waiting meter -------------------------------------------------- */
+
+.meter {
+  margin: 1.5rem auto 0;
+  width: 11rem;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+
+.meter__bar {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(360%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter__bar { animation: none; width: 100%; opacity: .5; }
+}
+
+/* --- error state -------------------------------------------------------- */
+
+#embed-stage[data-state="error"] .card__mark {
+  border-color: var(--danger);
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+/* --- buttons ------------------------------------------------------------
+   The base is the quiet one: a hairline on black. `--primary` and `--copy`
+   in flow.css are what fill with the accent. Every one of them clears the
+   tap target, on the handshake card as much as in the flow. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  margin-top: 1.2rem;
+  min-height: var(--tap);
+  padding: .6rem 1.5rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: .95rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+
+.button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* One focus ring for the whole surface, in the one colour we have. */
+.button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .button { transition: none; }
+}
+
+/* The retry button is only ever offered when retrying is the actual remedy. */
+.button[hidden] { display: none; }
+
+.embed__foot {
+  margin: 0;
+  font-size: .75rem;
+  letter-spacing: .1em;
+  color: var(--ink-3);
+}

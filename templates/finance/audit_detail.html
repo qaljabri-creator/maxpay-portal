@@ -1,0 +1,135 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+{% comment %}
+One audit entry (spec §9) — build-order step 12.
+
+The before/after table is the whole point of the screen: an entry that says only
+"wallet changed" is a record nobody can act on. Rows that actually differ are
+marked, so a snapshot of twenty fields does not hide the one that moved.
+{% endcomment %}
+
+{% block page_title %}{% trans "قيد تدقيق" %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:audit_list' %}">{% trans "سجل التدقيق" %}</a>{% endblock %}
+{% block heading %}{{ entry.get_action_display }}{% endblock %}
+
+{% block actions %}
+  <a class="btn btn--sm" href="{% url 'finance:audit_list' %}">{% trans "رجوع إلى السجل" %}</a>
+{% endblock %}
+
+{% block content %}
+<div class="split">
+  <div>
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "ما تغيّر" %}</h2>
+        <p class="panel__note">{% trans "لقطة القيم قبل الحدث وبعده كما كُتبت وقت وقوعه." %}</p>
+      </div>
+      <div class="panel__body panel__body--flush">
+        <div class="ledger-wrap">
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>{% trans "الحقل" %}</th>
+                <th>{% trans "قبل" %}</th>
+                <th>{% trans "بعد" %}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr class="{% if not row.changed %}is-muted{% endif %}">
+                  <td class="primary-cell">
+                    {{ row.label }}
+                    {% if row.changed %}<span class="stamp">{% trans "تغيّر" %}</span>{% endif %}
+                  </td>
+                  <td data-label="{% trans "قبل" %}">{{ row.before }}</td>
+                  <td data-label="{% trans "بعد" %}">{{ row.after }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="3">
+                    <div class="empty">
+                      {% trans "هذا القيد يسجّل وقوع الحدث دون لقطة قيم." %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    {% if neighbours %}
+      <div class="panel" style="animation-delay:.1s">
+        <div class="panel__head">
+          <h2>{% trans "قيود أخرى على الهدف نفسه" %}</h2>
+        </div>
+        <div class="panel__body panel__body--flush">
+          <ul class="strata">
+            {% for other in neighbours %}
+              <li class="strata__row">
+                <div><strong>{{ other.get_action_display }}</strong></div>
+                <div class="strata__who">{{ other.actor_label|default:_("النظام") }}</div>
+                <div class="strata__when">{{ other.created_at|date:"Y-m-d H:i:s" }}</div>
+                <div><a class="btn btn--sm btn--ghost" href="{% url 'finance:audit_detail' other.pk %}">{% trans "فتح" %}</a></div>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <aside class="split__side">
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "القيد" %}</h2></div>
+      <div class="panel__body">
+        <dl class="meta-list">
+          <div>
+            <dt>{% trans "الوقت" %}</dt>
+            <dd class="num">{{ entry.created_at|date:"Y-m-d H:i:s" }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "الإجراء" %}</dt>
+            <dd><span class="deed deed--{{ entry.action }}">{{ entry.get_action_display }}</span></dd>
+          </div>
+          <div>
+            <dt>{% trans "المنفّذ" %}</dt>
+            <dd>{{ entry.actor_label|default:_("النظام") }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "الحساب" %}</dt>
+            <dd>
+              {% if entry.actor %}{{ entry.actor.email }}
+              {% else %}<span class="helptext">{% trans "لا حساب داخلي" %}</span>{% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>{% trans "نوع الهدف" %}</dt>
+            <dd>{{ type_label }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "الهدف" %}</dt>
+            <dd>
+              {% if target %}
+                <a href="{{ target.url }}">{{ target.label }}</a>
+              {% else %}
+                <span class="num">{{ entry.target_type }}#{{ entry.target_id }}</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>{% trans "عنوان IP" %}</dt>
+            <dd class="num">{{ entry.ip|default:"···" }}</dd>
+          </div>
+        </dl>
+
+        <div class="warn-note" style="margin-top:1.1rem">
+          <strong>✦</strong>
+          <span>{% trans "قيود التدقيق تُكتب ولا تُعدَّل ولا تُحذف. لا يوجد في النظام مسار لتغيير هذه الصفحة." %}</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "طابور الطلبات" %}{% endblock %}
+{% block crumb %}{% trans "العمليات" %}{% endblock %}
+{% block heading %}{% trans "طابور الطلبات" %}{% endblock %}
+
+{% block content %}
+
+{% comment %}The desk's three questions, as tabs. Each one is the status
+filter set to a group, so a tab and a hand-picked filter are the same
+mechanism.{% endcomment %}
+<div class="tabs">
+  <a class="tab {% if active_status == 'awaiting_finance' %}is-active{% endif %}"
+     href="?status=awaiting_finance">
+    {% trans "بانتظار المالية" %}
+    <span class="tab__n" data-pulse="counts.awaiting_finance">{{ counts.awaiting_finance }}</span>
+  </a>
+  <a class="tab {% if active_status == 'awaiting_merchant' %}is-active{% endif %}"
+     href="?status=awaiting_merchant">
+    {% trans "لدى التجار" %}
+    <span class="tab__n" data-pulse="counts.awaiting_merchant">{{ counts.awaiting_merchant }}</span>
+  </a>
+  <a class="tab {% if active_status == 'open' %}is-active{% endif %}" href="?status=open">
+    {% trans "كل الجارية" %}
+    <span class="tab__n" data-pulse="counts.open">{{ counts.open }}</span>
+  </a>
+  <a class="tab {% if active_status == '' %}is-active{% endif %}" href="?status=">
+    {% trans "الكل" %}
+    <span class="tab__n" data-pulse="counts.all">{{ counts.all }}</span>
+  </a>
+</div>
+
+<div class="panel">
+  <form class="toolbar toolbar--wrap" method="get">
+    {{ filter_form.q }}
+    {{ filter_form.status }}
+    {{ filter_form.type }}
+    {{ filter_form.method }}
+    {{ filter_form.merchant }}
+    {{ filter_form.operator }}
+    {{ filter_form.sort }}
+    <label class="toolbar__pair">
+      <span>{% trans "من" %}</span>{{ filter_form.date_from }}
+    </label>
+    <label class="toolbar__pair">
+      <span>{% trans "إلى" %}</span>{{ filter_form.date_to }}
+    </label>
+    <button class="btn btn--sm" type="submit">{% trans "تصفية" %}</button>
+    {% if has_filters %}
+      <a class="btn btn--sm btn--ghost" href="{% url 'finance:request_list' %}">{% trans "إلغاء التصفية" %}</a>
+    {% endif %}
+    <span class="spacer"></span>
+    <span class="helptext">
+      {% blocktrans count n=paginator.count|default:requests|length %}طلب واحد{% plural %}{{ n }} طلب{% endblocktrans %}
+    </span>
+  </form>
+
+  {% include "finance/_queue_table.html" %}
+</div>
+
+{% if is_paginated %}
+  <div class="pager">
+    {% if page_obj.has_previous %}
+      <a class="btn btn--sm" href="?page={{ page_obj.previous_page_number }}&{{ querystring }}">{% trans "السابق" %}</a>
+    {% endif %}
+    <span class="helptext num">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a class="btn btn--sm" href="?page={{ page_obj.next_page_number }}&{{ querystring }}">{% trans "التالي" %}</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

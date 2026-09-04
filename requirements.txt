@@ -1,0 +1,30 @@
+# MaxPay Portal — runtime dependencies
+# Pinned to the versions verified against Django 5.2 / Python 3.13.
+
+Django==5.2.6
+djangorestframework==3.18.0
+psycopg[binary]==3.3.4
+
+# Internal auth — mandatory 2FA (spec §4, §11)
+django-otp==1.7.0
+django-two-factor-auth==1.18.1
+qrcode==8.2
+
+# PaymentMethod.icon
+Pillow==12.3.0
+
+# Settings
+python-dotenv==1.2.3
+
+# Report export (spec §9) — build-order step 16. Chosen over xlsxwriter
+# because the export *tests* read the file back, and openpyxl is the one
+# library that both writes and reads.
+openpyxl==3.1.5
+
+# B2CORE iframe embedding and JWT verification (spec §4)
+django-cors-headers==4.9.0
+# Pin the major version: pip resolves a bare "PyJWT" to a 1.x release that does
+# not import on Python 3.13.
+PyJWT==2.13.0
+cryptography==50.0.0
+

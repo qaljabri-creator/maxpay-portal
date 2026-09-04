@@ -1,0 +1,83 @@
+{% extends "portal/base.html" %}
+{% load static i18n %}
+
+{% comment %}
+The page B2CORE frames (spec §4). It renders no client data and makes no
+decision of its own: everything visible is a state of the handshake, driven by
+static/js/embed.js.
+
+There is no inline script and no inline style anywhere on this page — the CSP
+that ships with it is `default-src 'self'`, and an inline handler would need
+that relaxed. Configuration reaches the script through the JSON island below.
+{% endcomment %}
+
+{% block title %}{% trans "بوابة MaxPay" %}{% endblock %}
+
+{% block extra_media %}
+  <link rel="stylesheet" href="{% static 'css/flow.css' %}">
+{% endblock %}
+
+{% block body %}
+<main class="embed__stage" id="embed-stage" data-state="{% if not configured %}unconfigured{% else %}connecting{% endif %}">
+
+  <div class="card" role="status" aria-live="polite">
+
+    <div class="card__mark" aria-hidden="true">
+      <span class="card__mark-glyph">MP</span>
+    </div>
+
+    <h1 class="card__title" id="embed-title">{% trans "جارٍ الاتصال بحسابك" %}</h1>
+
+    {% comment %}One panel per state. The script flips data-state on the
+    stage; CSS shows exactly one of these at a time.{% endcomment %}
+
+    <section class="panel" data-for="connecting">
+      <p class="panel__lead">{% trans "نتحقق من هويتك عبر B2CORE. لن يستغرق الأمر سوى لحظات." %}</p>
+      <div class="meter" aria-hidden="true"><span class="meter__bar"></span></div>
+    </section>
+
+    <section class="panel" data-for="ready">
+      <p class="panel__lead">{% trans "تم التحقق من هويتك." %}</p>
+      <p class="panel__note" id="embed-greeting"></p>
+    </section>
+
+    <section class="panel" data-for="error">
+      <p class="panel__lead" id="embed-error">{% trans "تعذّر إكمال الاتصال." %}</p>
+      <button type="button" class="button" id="embed-retry">{% trans "إعادة المحاولة" %}</button>
+      <p class="panel__note panel__note--muted" id="embed-error-code"></p>
+    </section>
+
+    <section class="panel" data-for="logged-out">
+      <p class="panel__lead">{% trans "تم إنهاء الجلسة." %}</p>
+      <p class="panel__note panel__note--muted">
+        {% trans "سجّل الدخول من جديد في B2CORE للعودة." %}
+      </p>
+    </section>
+
+    <section class="panel" data-for="standalone">
+      <p class="panel__lead">{% trans "تُفتح هذه الصفحة من داخل حسابك في B2CORE." %}</p>
+      <p class="panel__note panel__note--muted">
+        {% trans "لا يمكن استخدامها مباشرة، لأن هويتك تصل من هناك." %}
+      </p>
+    </section>
+
+    <section class="panel" data-for="unconfigured">
+      <p class="panel__lead">{% trans "الخدمة غير مهيّأة بعد على هذا الخادم." %}</p>
+      <p class="panel__note panel__note--muted">
+        {% trans "تواصل مع الدعم الفني." %}
+      </p>
+    </section>
+
+  </div>
+
+  {% comment %}The client flow (step 6). It stays hidden until the handshake
+  reports a session; flow.js takes over the stage from there.{% endcomment %}
+  {% include "portal/flow.html" %}
+
+  <p class="embed__foot">{% trans "MaxPay · MaxiFyFX" %}</p>
+</main>
+
+{{ embed_config|json_script:"maxpay-embed-config" }}
+<script src="{% static 'js/embed.js' %}" defer></script>
+<script src="{% static 'js/flow.js' %}" defer></script>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% comment %}
+One row per managed permission, three states each. "من الدور" is not a stored
+value — it is the absence of an override, and it is the default because the
+role baseline is what should normally be governing.
+{% endcomment %}
+
+{% block page_title %}{% trans "صلاحيات" %} {{ account.full_name }}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:user_detail' account.pk %}">{{ account.full_name }}</a>{% endblock %}
+{% block heading %}{% trans "الصلاحيات" %}{% endblock %}
+
+{% block actions %}<span class="pip">{{ account.get_role_display }}</span>{% endblock %}
+
+{% block content %}
+<form method="post">
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+    <div class="form-errors">
+      {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="panel__head">
+      <h2>{% trans "قاعدة الدور والاستثناءات" %}</h2>
+      <p class="panel__note">
+        {% trans "«ممنوعة» تُطرح فعليًا وقت التحقق من الصلاحية، لا شكليًا: مجموعة الدور تُعاد إلى الحساب عند كل حفظ، والمنع هو ما يصمد أمامها." %}
+      </p>
+    </div>
+    <div class="panel__body panel__body--flush">
+      <div class="ledger-wrap">
+        <table class="ledger">
+          <thead>
+            <tr>
+              <th>{% trans "الصلاحية" %}</th>
+              <th>{% trans "المعرّف" %}</th>
+              <th>{% trans "من الدور" %}</th>
+              <th>{% trans "الحالة" %}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in form.rows %}
+              <tr>
+                <td class="primary-cell">{{ row.name }}</td>
+                <td class="num" data-label="{% trans "المعرّف" %}">{{ row.label }}</td>
+                <td data-label="{% trans "من الدور" %}">
+                  {% comment %}Neutral, not accent. This column is a fact about
+                  the role, not something waiting to be acted on, and twenty
+                  cyan chips down one screen is the accent meaning nothing.
+                  Brightness alone separates the two states.{% endcomment %}
+                  {% if row.in_baseline %}
+                    <span class="state">{% trans "ممنوحة" %}</span>
+                  {% else %}
+                    <span class="state state--off">{% trans "غير ممنوحة" %}</span>
+                  {% endif %}
+                </td>
+                <td data-label="{% trans "الحالة" %}">{{ row.field }}{{ row.field.errors }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn btn--primary" type="submit">{% trans "حفظ الصلاحيات" %}</button>
+    <a class="btn btn--ghost" href="{% url 'finance:user_detail' account.pk %}">{% trans "إلغاء" %}</a>
+  </div>
+</form>
+{% endblock %}

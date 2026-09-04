@@ -1,0 +1,22 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% if object %}{% trans "تعديل تاجر" %}{% else %}{% trans "تاجر جديد" %}{% endif %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:merchant_list' %}">{% trans "التجار" %}</a>{% endblock %}
+{% block heading %}{% if object %}{{ object.name }}{% else %}{% trans "تاجر جديد" %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel" style="max-width:48rem">
+  <div class="panel__head"><h2>{% trans "بيانات التاجر" %}</h2></div>
+  <div class="panel__body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "finance/_form_fields.html" with wide_fields="notes" %}
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">{% trans "حفظ" %}</button>
+        <a class="btn btn--ghost" href="{% if object %}{% url 'finance:merchant_detail' object.pk %}{% else %}{% url 'finance:merchant_list' %}{% endif %}">{% trans "إلغاء" %}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

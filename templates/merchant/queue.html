@@ -1,0 +1,70 @@
+{% extends "merchant/base.html" %}
+{% load i18n merchant_fmt %}
+
+{# Every value on this page came out of MerchantRequestSummarySerializer. There
+   is no Request object in this template's context, so there is nothing here to
+   walk back to a client even by accident (spec §2). #}
+
+{% block page_title %}{% trans "الطلبات المُسندة" %}{% endblock %}
+{% block crumb %}{% trans "العمل" %}{% endblock %}
+{% block heading %}{% trans "الطلبات المُسندة إليّ" %}{% endblock %}
+
+{% block content %}
+
+<div class="tabs">
+  <a class="tab {% if active_status == 'awaiting_me' %}is-active{% endif %}" href="?status=awaiting_me">
+    {% trans "بانتظاري" %}
+    <span class="tab__n" data-pulse="counts.awaiting_me">{{ counts.awaiting_me }}</span>
+  </a>
+  <a class="tab {% if active_status == 'open' %}is-active{% endif %}" href="?status=open">
+    {% trans "الجارية" %}
+    <span class="tab__n" data-pulse="counts.open">{{ counts.open }}</span>
+  </a>
+  <a class="tab {% if active_status == '' %}is-active{% endif %}" href="?status=">
+    {% trans "الكل" %}
+    <span class="tab__n" data-pulse="counts.all">{{ counts.all }}</span>
+  </a>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2>{% trans "الطابور" %}</h2>
+    <p class="panel__note">
+      {% trans "لا تظهر هنا أي بيانات تعريف عن العميل: لا اسم ولا رقم حساب ولا بريد. هذا مقصود." %}
+    </p>
+  </div>
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "المرجع" %}</th>
+            <th>{% trans "النوع" %}</th>
+            <th>{% trans "المبلغ" %}</th>
+            <th>{% trans "الطريقة" %}</th>
+            <th>{% trans "المحفظة / الوجهة" %}</th>
+            <th>{% trans "الحالة" %}</th>
+            <th>{% trans "أُسند" %}</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody id="queue-rows" data-live-rows="{{ rows_url }}">
+          {% include "merchant/_queue_rows.html" %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if page.num_pages > 1 %}
+  <div class="pager">
+    {% if page.has_previous %}
+      <a class="btn btn--sm" href="?status={{ active_status }}&page={{ page.previous }}">{% trans "السابق" %}</a>
+    {% endif %}
+    <span class="helptext num">{{ page.number }} / {{ page.num_pages }}</span>
+    {% if page.has_next %}
+      <a class="btn btn--sm" href="?status={{ active_status }}&page={{ page.next }}">{% trans "التالي" %}</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,29 @@
+{% load i18n %}
+{% comment %}
+The conversation on one request, on its own — build-order step 13.
+
+Included by finance/request_detail.html on load, and served whole by
+finance:request_thread when the poll notices a new message (spec §10).
+
+The composer is deliberately *not* in here. Swapping a textarea somebody is
+typing into, six times a minute, would be a worse feature than no live thread.
+{% endcomment %}
+{% for entry in thread %}
+  <li class="note note--{{ entry.message.sender_role }} {% if entry.message.is_internal_note %}note--internal{% endif %}">
+    <div class="note__head">
+      <span class="note__who">{{ entry.message.get_sender_role_display }}</span>
+      {% if entry.message.is_internal_note %}<span class="note__tag">{% trans "داخلية" %}</span>{% endif %}
+      <span class="note__at num">{{ entry.message.created_at|date:"Y-m-d H:i" }}</span>
+    </div>
+    {% if entry.message.body %}
+      <p class="note__body" dir="auto">{{ entry.message.body|linebreaksbr }}</p>
+    {% endif %}
+    {% if entry.file %}
+      <a class="note__file" href="{{ entry.file.url }}" target="_blank" rel="noopener">
+        {{ entry.file.obj.original_name|default:_("مرفق") }}
+      </a>
+    {% endif %}
+  </li>
+{% empty %}
+  <li class="empty">{% trans "لا توجد رسائل على هذا الطلب." %}</li>
+{% endfor %}

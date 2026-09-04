@@ -1,0 +1,78 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "طرق الدفع" %}{% endblock %}
+{% block crumb %}{% trans "الشبكة" %}{% endblock %}
+{% block heading %}{% trans "طرق الدفع" %}{% endblock %}
+
+{% block actions %}
+  {% if can_manage_payment_methods %}
+    <a class="btn btn--primary" href="{% url 'finance:payment_method_create' %}">{% trans "طريقة جديدة" %}</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2>{% trans "الطرق المتاحة" %}</h2>
+    <p class="panel__note">{% trans "الترتيب هنا هو ترتيب ظهورها للعميل." %}</p>
+  </div>
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "الترتيب" %}</th>
+            <th>{% trans "الاسم" %}</th>
+            <th>{% trans "الرمز" %}</th>
+            <th>{% trans "الاتجاهات" %}</th>
+            <th>{% trans "الحالة" %}</th>
+            <th>{% trans "تجار" %}</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for method in payment_methods %}
+            <tr class="{% if not method.is_active %}is-muted{% endif %}" style="animation-delay:{{ forloop.counter0 }}0ms">
+              <td class="num" data-label="{% trans "الترتيب" %}">{{ method.sort_order }}</td>
+              <td class="primary-cell">{{ method.caption_ar }} <span class="helptext">{{ method.caption_en }}</span></td>
+              <td class="num" data-label="{% trans "الرمز" %}">{{ method.code }}</td>
+              <td data-label="{% trans "الاتجاهات" %}">
+                {% if method.supports_deposit %}<span class="state state--on">{% trans "إيداع" %}</span>{% endif %}
+                {% if method.supports_withdrawal %}<span class="state state--on">{% trans "سحب" %}</span>{% endif %}
+              </td>
+              <td data-label="{% trans "الحالة" %}">
+                {% if method.is_active %}
+                  <span class="state state--on">{% trans "نشطة" %}</span>
+                {% else %}
+                  <span class="state state--off">{% trans "موقوفة" %}</span>
+                {% endif %}
+              </td>
+              <td class="num" data-label="{% trans "تجار" %}">{{ method.merchant_total }}</td>
+              <td class="actions">
+                {% if can_manage_payment_methods %}
+                  <a class="btn btn--sm btn--ghost" href="{% url 'finance:payment_method_update' method.pk %}">{% trans "تعديل" %}</a>
+                  <form class="inline-form" method="post" action="{% url 'finance:payment_method_toggle' method.pk %}">
+                    {% csrf_token %}
+                    <button class="btn btn--sm {% if method.is_active %}btn--danger{% endif %}" type="submit">
+                      {% if method.is_active %}{% trans "إيقاف" %}{% else %}{% trans "تفعيل" %}{% endif %}
+                    </button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7">
+                <div class="empty">
+                  {% trans "لم تُضف أي طريقة دفع بعد." %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

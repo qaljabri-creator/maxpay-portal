@@ -1,0 +1,143 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% comment %}
+Read-only by construction, like the audit viewer: no form, no button that
+submits, no route behind this page that writes. See
+apps/finance/integration_views.py for why this configuration stays in the
+environment rather than becoming a settings screen.
+
+Every class here already exists in static/css/portal.css. A diagnostic page is
+the last place that should earn its own stylesheet.
+{% endcomment %}
+
+{% block page_title %}{% trans "تكامل B2CORE" %}{% endblock %}
+{% block crumb %}{% trans "الضبط والرقابة" %}{% endblock %}
+{% block heading %}{% trans "تكامل B2CORE" %}{% endblock %}
+
+{% block content %}
+
+  {% if not b2core_configured %}
+    <div class="warn-note warn-note--danger">
+      <strong>⚠</strong>
+      <span>{% trans "التكامل غير مكتمل الضبط على هذا الخادم: لا يستطيع أي عميل الدخول، والبوابة سترفض أن تُعرض داخل إطار B2CORE. القيم تُضبط في بيئة التشغيل." %}</span>
+    </div>
+  {% endif %}
+
+  {% for gap in b2core_gaps %}
+    <div class="warn-note">
+      <strong>⚠</strong>
+      <span>{{ gap }}</span>
+    </div>
+  {% endfor %}
+
+  <div class="panel">
+    <div class="panel__head">
+      <h2>{% trans "الإعدادات الحالية" %}</h2>
+      <span class="state state--off">{% trans "عرض فقط" %}</span>
+    </div>
+    <div class="panel__body">
+      <p class="panel__note">
+        {% trans "هذه القيم تأتي من متغيّرات بيئة التشغيل ولا تُعدَّل من هنا. تغييرها قرار نشر: يحدّد من يملك تأطير البوابة ومن تُصدَّق رموزه، ويجب أن يكون واحدًا على كل عمّال الخادم ومراجعًا كما تُراجع الشيفرة. لتغييرها راجع فريق التشغيل و‎.env.example‎." %}
+      </p>
+
+      <dl class="meta-list">
+        <div>
+          <dt>{% trans "رابط JWKS" %}</dt>
+          {% comment %}dir="ltr" on every one of these: a URL or an issuer
+          string read inside an RTL page is reordered by the bidi algorithm
+          around its punctuation, and an operator comparing it by eye against
+          the environment would be comparing a different string.{% endcomment %}
+          <dd>{% if b2core.jwks_url %}<span class="num" dir="ltr">{{ b2core.jwks_url }}</span>{% else %}<span class="state state--off">{% trans "غير مضبوط" %}</span>{% endif %}</dd>
+        </div>
+        <div>
+          <dt>{% trans "المُصدِر (issuer)" %}</dt>
+          <dd>{% if b2core.issuer %}<span class="num" dir="ltr">{{ b2core.issuer }}</span>{% else %}<span class="state state--off">{% trans "غير مضبوط — لا يُتحقق من iss" %}</span>{% endif %}</dd>
+        </div>
+        <div>
+          <dt>{% trans "الجمهور (audience)" %}</dt>
+          <dd>{% if b2core.audience %}<span class="num" dir="ltr">{{ b2core.audience }}</span>{% else %}<span class="state state--off">{% trans "غير مضبوط — لا يُتحقق من aud" %}</span>{% endif %}</dd>
+        </div>
+        <div>
+          <dt>{% trans "أصل الإطار (origin)" %}</dt>
+          <dd>{% if b2core.origin %}<span class="num" dir="ltr">{{ b2core.origin }}</span>{% else %}<span class="state state--off">{% trans "غير مضبوط" %}</span>{% endif %}</dd>
+        </div>
+        <div>
+          <dt>{% trans "خوارزميات التوقيع" %}</dt>
+          <dd><span class="num" dir="ltr">{{ b2core.algorithms|join:"، " }}</span></dd>
+        </div>
+        <div>
+          <dt>{% trans "تسامح الوقت" %}</dt>
+          <dd>{{ b2core.leeway_seconds }}<span class="unit">{% trans "ثانية" %}</span></dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel__head">
+      <h2>{% trans "حالة مفاتيح التوقيع" %}</h2>
+      {% if jwks_status.state == "ok" %}
+        <span class="state state--on">{% trans "يعمل" %}</span>
+      {% elif jwks_status.state == "failing" %}
+        <span class="state state--warn">{% trans "آخر محاولة فشلت" %}</span>
+      {% else %}
+        <span class="state state--off">{% trans "لا توجد بيانات بعد" %}</span>
+      {% endif %}
+    </div>
+    <div class="panel__body">
+      <dl class="meta-list">
+        <div>
+          <dt>{% trans "آخر استخراج ناجح لمفتاح" %}</dt>
+          <dd>
+            {% if jwks_status.last_success_at %}
+              {{ jwks_status.last_success_at|date:"Y-m-d H:i" }}
+              <span class="sub-figure">{% blocktrans with ago=jwks_status.last_success_at|timesince %}قبل {{ ago }}{% endblocktrans %}</span>
+            {% else %}
+              <span class="helptext">{% trans "لم يُسجَّل بعد على هذه العملية" %}</span>
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>{% trans "آخر إعادة جلب للمفاتيح" %}</dt>
+          <dd>
+            {% if jwks_status.last_refresh_at %}
+              {{ jwks_status.last_refresh_at|date:"Y-m-d H:i" }}
+            {% else %}
+              <span class="helptext">{% trans "لم تُطلب إعادة جلب" %}</span>
+            {% endif %}
+          </dd>
+        </div>
+        {% if jwks_status.last_failure_at %}
+          <div>
+            <dt>{% trans "آخر فشل" %}</dt>
+            <dd>
+              {{ jwks_status.last_failure_at|date:"Y-m-d H:i" }}
+              {% if jwks_status.last_failure_reason %}
+                <span class="sub-figure num" dir="ltr">{{ jwks_status.last_failure_reason }}</span>
+              {% endif %}
+            </dd>
+          </div>
+        {% endif %}
+        <div>
+          <dt>{% trans "عمر ذاكرة المفاتيح" %}</dt>
+          <dd>{{ b2core.cache_seconds }}<span class="unit">{% trans "ثانية" %}</span></dd>
+        </div>
+        <div>
+          <dt>{% trans "مهلة الاتصال" %}</dt>
+          <dd>{{ b2core.timeout_seconds }}<span class="unit">{% trans "ثانية" %}</span></dd>
+        </div>
+      </dl>
+
+      {% comment %}Both caveats stated on the page rather than left for someone
+      to infer. A number read as more than it is, is worse than no number.{% endcomment %}
+      <p class="panel__note">
+        {% trans "«استخراج ناجح» يعني أن مفتاح توقيع رمزٍ ما تحدَّد بنجاح — وقد يكون من الذاكرة المؤقتة دون أي اتصال بـ B2CORE. لذلك اقرأه دائمًا مع عمر الذاكرة أعلاه. هذه الصفحة لا تتصل بـ B2CORE عند فتحها؛ تعرض ما لاحظه الخادم أثناء خدمة العملاء فعليًا." %}
+      </p>
+      <p class="panel__note">
+        {% trans "هذه القراءة تخصّ العملية التي خدمت هذه الصفحة وحدها. إن كان الخادم يشغّل عدة عمّال، فلكل واحد ذاكرته وسجلّه، وتحديث الصفحة قد يصل إلى عامل آخر بأرقام مختلفة." %}
+      </p>
+    </div>
+  </div>
+
+{% endblock %}

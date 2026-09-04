@@ -1,0 +1,141 @@
+{% extends "merchant/base.html" %}
+{% load i18n %}
+
+{% comment %}
+Every value on this page came out of MerchantReportRowSerializer. There is no
+Request object in this template's context, so there is nothing here to walk back
+to a client even by accident (spec §2) — the same rule the queue follows.
+{% endcomment %}
+
+{% block page_title %}{% trans "التقارير" %}{% endblock %}
+{% block crumb %}{% trans "حسابي" %}{% endblock %}
+{% block heading %}{% trans "تقرير طلباتي" %}{% endblock %}
+
+{% block actions %}
+  <a class="btn btn--primary" href="{% url 'merchant_panel:report_export' %}?{{ querystring }}">
+    {% trans "تصدير Excel" %}
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<div class="panel">
+  <form class="toolbar toolbar--wrap" method="get">
+    <label class="toolbar__pair">
+      <span>{% trans "من" %}</span>{{ filter_form.date_from }}
+    </label>
+    <label class="toolbar__pair">
+      <span>{% trans "إلى" %}</span>{{ filter_form.date_to }}
+    </label>
+    {{ filter_form.status }}
+    {{ filter_form.type }}
+    {{ filter_form.method }}
+    <button class="btn btn--sm" type="submit">{% trans "تطبيق" %}</button>
+    <a class="btn btn--sm btn--ghost" href="{% url 'merchant_panel:report' %}">{% trans "إعادة الضبط" %}</a>
+    <span class="spacer"></span>
+    <span class="helptext">{% trans "المبالغ لا تشمل الطلبات المرفوضة." %}</span>
+  </form>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.count }}</div>
+    <div class="kpi__l">{% trans "طلب" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.total_usd|floatformat:"2u" }}</div>
+    <div class="kpi__l">{% trans "إجمالي الدولار" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.total_iqd|floatformat:"-2u" }}</div>
+    <div class="kpi__l">{% trans "إجمالي الدينار" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.rejected }}</div>
+    <div class="kpi__l">{% trans "مرفوض، خارج الإجمالي" %}</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2>{% trans "حسب الحالة" %}</h2>
+    <p class="panel__note">
+      {% trans "لا يظهر في هذا التقرير ولا في ملفه أي بيان تعريف عن العميل: لا اسم ولا رقم حساب ولا بريد." %}
+    </p>
+  </div>
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "الحالة" %}</th>
+            <th>{% trans "العدد" %}</th>
+            <th>{% trans "دولار" %}</th>
+            <th>{% trans "دينار" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.by_status %}
+            <tr>
+              <td class="primary-cell"><span class="pip pip--{{ row.key }}">{{ row.label }}</span></td>
+              <td class="num" data-label="{% trans "العدد" %}">{{ row.count }}</td>
+              <td class="num" data-label="{% trans "دولار" %}">{{ row.usd|floatformat:"2u" }}</td>
+              <td class="num" data-label="{% trans "دينار" %}">{{ row.iqd|floatformat:"-2u" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4"><div class="empty">{% trans "لا توجد طلبات في هذا المدى." %}</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2>{% trans "الطلبات" %}</h2>
+    <p class="panel__note">
+      {% blocktrans with n=preview_limit %}تعرض الشاشة أول {{ n }} طلب. الملف المصدَّر يحمل كل الصفوف.{% endblocktrans %}
+    </p>
+  </div>
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>{% for column in columns %}<th>{{ column.label }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for cells in preview %}
+            <tr>
+              {% for cell in cells %}
+                {% if forloop.first %}
+                  <td class="primary-cell num">{{ cell.value|default:"···" }}</td>
+                {% else %}
+                  <td class="{% if cell.ltr %}num{% endif %}" data-label="{{ cell.label }}">{{ cell.value|default:"···" }}</td>
+                {% endif %}
+              {% endfor %}
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="{{ columns|length }}">
+                <div class="empty">{% trans "لا توجد طلبات مطابقة." %}</div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel__head"><h2>{% trans "ما يجيب عنه التقرير" %}</h2></div>
+  <div class="panel__body">
+    <dl class="meta-list">
+      {% for label, value in filter_pairs %}
+        <div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
+      {% endfor %}
+    </dl>
+  </div>
+</div>
+{% endblock %}

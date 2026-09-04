@@ -1,0 +1,112 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "نظرة عامة" %}{% endblock %}
+{% block crumb %}{% trans "لوحة المالية" %}{% endblock %}
+{% block heading %}{% trans "نظرة عامة" %}{% endblock %}
+
+{% block content %}
+  {# What needs working on, before what governs it. #}
+  <div class="queue-strip">
+    <a class="queue-cell {% if queue.awaiting_finance %}queue-cell--live{% endif %}"
+       href="{% url 'finance:request_list' %}?status=awaiting_finance">
+      <span class="queue-cell__n num">{{ queue.awaiting_finance }}</span>
+      <span class="queue-cell__l">{% trans "بانتظار المالية" %}</span>
+    </a>
+    <a class="queue-cell" href="{% url 'finance:request_list' %}?status=awaiting_merchant">
+      <span class="queue-cell__n num">{{ queue.awaiting_merchant }}</span>
+      <span class="queue-cell__l">{% trans "لدى التجار" %}</span>
+    </a>
+    <a class="queue-cell" href="{% url 'finance:request_list' %}?status=submitted">
+      <span class="queue-cell__n num">{{ queue.by_status.submitted|default:"0" }}</span>
+      <span class="queue-cell__l">{% trans "جديدة لم تُراجَع" %}</span>
+    </a>
+    <a class="queue-cell" href="{% url 'finance:request_list' %}?status=merchant_confirmed">
+      <span class="queue-cell__n num">{{ queue.by_status.merchant_confirmed|default:"0" }}</span>
+      <span class="queue-cell__l">{% trans "أكّدها التاجر، بانتظار التقييد" %}</span>
+    </a>
+  </div>
+
+  <div class="rate-cards">
+    <div class="rate-card {% if not deposit_rate %}rate-card--none{% endif %}" style="animation-delay:.02s">
+      <div class="rate-card__label">
+        <span>{% trans "سعر الإيداع السارٍ" %}</span>
+        {% if deposit_rate %}<span class="stamp">{% trans "سارٍ" %}</span>{% endif %}
+      </div>
+      {% if deposit_rate %}
+        <div class="rate-card__value">{{ deposit_rate.iqd_per_usd|floatformat:"-2u" }}</div>
+        <div class="rate-card__unit">{% trans "دينار لكل دولار" %}</div>
+        <div class="rate-card__foot">
+          {% blocktrans with c=deposit_rate.commission_iqd_per_100usd|floatformat:"-2u" %}عمولة {{ c }} دينار لكل 100 دولار{% endblocktrans %}
+          · {{ deposit_rate.effective_from|date:"Y-m-d H:i" }}
+        </div>
+      {% else %}
+        <div class="rate-card__value">···</div>
+        <div class="rate-card__unit">{% trans "لم يُضبط سعر إيداع بعد" %}</div>
+        <div class="rate-card__foot">
+          <a href="{% url 'finance:rate_create' %}?rate_type=deposit">{% trans "اضبط السعر الآن" %}</a>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="rate-card {% if not withdrawal_rate %}rate-card--none{% endif %}" style="animation-delay:.08s">
+      <div class="rate-card__label">
+        <span>{% trans "سعر السحب السارٍ" %}</span>
+        {% if withdrawal_rate %}<span class="stamp">{% trans "سارٍ" %}</span>{% endif %}
+      </div>
+      {% if withdrawal_rate %}
+        <div class="rate-card__value">{{ withdrawal_rate.iqd_per_usd|floatformat:"-2u" }}</div>
+        <div class="rate-card__unit">{% trans "دينار لكل دولار" %}</div>
+        <div class="rate-card__foot">
+          {% blocktrans with c=withdrawal_rate.commission_iqd_per_100usd|floatformat:"-2u" %}عمولة {{ c }} دينار لكل 100 دولار{% endblocktrans %}
+          · {{ withdrawal_rate.effective_from|date:"Y-m-d H:i" }}
+        </div>
+      {% else %}
+        <div class="rate-card__value">···</div>
+        <div class="rate-card__unit">{% trans "لم يُضبط سعر سحب بعد" %}</div>
+        <div class="rate-card__foot">
+          <a href="{% url 'finance:rate_create' %}?rate_type=withdrawal">{% trans "اضبط السعر الآن" %}</a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi__n">{{ merchant_count }}</div><div class="kpi__l">{% trans "تاجر نشط" %}</div></div>
+    <div class="kpi"><div class="kpi__n">{{ method_count }}</div><div class="kpi__l">{% trans "طريقة دفع نشطة" %}</div></div>
+    <div class="kpi"><div class="kpi__n">{{ active_wallet_count }}</div><div class="kpi__l">{% trans "محفظة نشطة" %}</div></div>
+  </div>
+
+  {% if gaps %}
+    <div class="panel" style="animation-delay:.14s">
+      <div class="panel__head">
+        <h2>{% trans "طرق بلا محفظة نشطة" %}</h2>
+        <p class="panel__note">{% trans "هذه الطرق لا يمكن عرضها على العميل للإيداع حتى تُفعَّل محفظة." %}</p>
+      </div>
+      <div class="panel__body panel__body--flush">
+        <div class="ledger-wrap">
+          <table class="ledger">
+            <thead>
+              <tr><th>{% trans "التاجر" %}</th><th>{% trans "طريقة الدفع" %}</th><th class="actions"></th></tr>
+            </thead>
+            <tbody>
+              {% for gap in gaps %}
+                <tr>
+                  <td class="primary-cell">{{ gap.merchant.name }}</td>
+                  <td data-label="{% trans "طريقة الدفع" %}">{{ gap.payment_method }}</td>
+                  <td class="actions">
+                    {% if can_manage_merchants %}
+                      <a class="btn btn--sm" href="{% url 'finance:wallet_create' gap.pk %}">{% trans "أضف محفظة" %}</a>
+                    {% else %}
+                      <a class="btn btn--sm btn--ghost" href="{% url 'finance:merchant_detail' gap.merchant_id %}">{% trans "عرض" %}</a>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

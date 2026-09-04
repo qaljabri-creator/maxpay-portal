@@ -1,0 +1,116 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "التجار" %}{% endblock %}
+{% block crumb %}{% trans "الشبكة" %}{% endblock %}
+{% block heading %}{% trans "التجار والمحافظ" %}{% endblock %}
+
+{% block actions %}
+  {% if can_manage_merchants %}
+    <a class="btn btn--primary" href="{% url 'finance:merchant_create' %}">{% trans "تاجر جديد" %}</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <form class="toolbar" method="get">
+    <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'ابحث باسم التاجر أو حساب الدخول' %}" style="min-width:18rem">
+    <select name="status">
+      <option value="">{% trans "كل الحالات" %}</option>
+      <option value="active" {% if status == 'active' %}selected{% endif %}>{% trans "نشط" %}</option>
+      <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>{% trans "غير نشط" %}</option>
+      {% comment %}The one place an archived merchant appears, and only when
+      asked for by name. "كل الحالات" means every live merchant, not every row
+      in the table — a default list that quietly still contains the archived
+      ones is the thing archiving was meant to fix.{% endcomment %}
+      {% if archived_count %}
+        <option value="archived" {% if status == 'archived' %}selected{% endif %}>{% trans "الأرشيف" %}</option>
+      {% endif %}
+    </select>
+    <button class="btn btn--sm" type="submit">{% trans "تصفية" %}</button>
+    {% if search or status %}
+      <a class="btn btn--sm btn--ghost" href="{% url 'finance:merchant_list' %}">{% trans "إلغاء" %}</a>
+    {% endif %}
+    <span class="spacer"></span>
+    <span class="helptext">{% blocktrans count n=paginator.count|default:merchants|length %}تاجر واحد{% plural %}{{ n }} تاجر{% endblocktrans %}</span>
+  </form>
+
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "التاجر" %}</th>
+            <th>{% trans "الحالة" %}</th>
+            <th>{% trans "حساب الدخول" %}</th>
+            <th>{% trans "الطرق" %}</th>
+            <th>{% trans "محافظ نشطة" %}</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for merchant in merchants %}
+            <tr class="{% if not merchant.is_active %}is-muted{% endif %}" style="animation-delay:{{ forloop.counter0 }}0ms">
+              <td class="primary-cell">
+                <a href="{% url 'finance:merchant_detail' merchant.pk %}">{{ merchant.name }}</a>
+              </td>
+              <td data-label="{% trans "الحالة" %}">
+                {% if merchant.is_active %}
+                  <span class="state state--on">{% trans "نشط" %}</span>
+                {% else %}
+                  <span class="state state--off">{% trans "موقوف" %}</span>
+                {% endif %}
+              </td>
+              <td data-label="{% trans "حساب الدخول" %}">
+                {% if merchant.user %}
+                  {{ merchant.user.full_name }}
+                {% else %}
+                  <span class="helptext">{% trans "بلا حساب" %}</span>
+                {% endif %}
+              </td>
+              <td class="num" data-label="{% trans "الطرق" %}">{{ merchant.method_total }}</td>
+              <td data-label="{% trans "محافظ نشطة" %}">
+                {% if merchant.active_wallets %}
+                  <span class="num">{{ merchant.active_wallets }}</span>
+                {% else %}
+                  <span class="state state--warn">{% trans "لا محفظة" %}</span>
+                {% endif %}
+              </td>
+              <td class="actions">
+                <a class="btn btn--sm btn--ghost" href="{% url 'finance:merchant_detail' merchant.pk %}">{% trans "تفاصيل" %}</a>
+                {% if merchant.is_archived and can_archive %}
+                  <form class="inline-form" method="post" action="{% url 'finance:merchant_archive' merchant.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="restore" value="1">
+                    <button class="btn btn--sm btn--ghost" type="submit">{% trans "إعادة من الأرشيف" %}</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6">
+                <div class="empty">
+                  {% trans "لا يوجد تجار مطابقون." %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if is_paginated %}
+  <div class="form-actions" style="border:0; margin:0;">
+    {% if page_obj.has_previous %}
+      <a class="btn btn--sm" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}">{% trans "السابق" %}</a>
+    {% endif %}
+    <span class="helptext">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a class="btn btn--sm" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search }}{% endif %}{% if status %}&status={{ status }}{% endif %}">{% trans "التالي" %}</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

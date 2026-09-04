@@ -1,0 +1,152 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+{% comment %}
+Business hours (spec §5, §9) — build-order step 11.
+
+No script. The live countdown spec §7 asks for belongs on the client's closed
+notice, where a client is waiting for the door to open; here the next change is
+a timestamp, and the internal panel stays free of JavaScript.
+
+Someone without `core.change_systemsettings` gets the same page with the
+settings rendered as text rather than as a form — the hours govern whether the
+queue fills at all, so reading them is part of working the desk.
+{% endcomment %}
+
+{% block page_title %}{% trans "مواعيد العمل" %}{% endblock %}
+{% block crumb %}{% trans "الضبط والرقابة" %}{% endblock %}
+{% block heading %}{% trans "مواعيد العمل" %}{% endblock %}
+
+{% block content %}
+
+  <div class="rate-cards">
+    <div class="rate-card {% if not hours.is_open %}rate-card--none{% endif %}">
+      <div class="rate-card__label">
+        <span>{% trans "حالة البوابة الآن" %}</span>
+        {% if hours.is_overridden %}<span class="state state--warn">{% trans "تجاوز يدوي" %}</span>{% endif %}
+      </div>
+      <div class="rate-card__value">
+        {% if hours.is_open %}{% trans "مفتوحة" %}{% else %}{% trans "مغلقة" %}{% endif %}
+      </div>
+      <div class="rate-card__unit">
+        {% if hours.is_open %}
+          {% trans "العملاء يستطيعون تقديم طلبات إيداع وسحب." %}
+        {% else %}
+          {% trans "شاشات التقديم مستبدلة بإشعار الإغلاق والعدّاد." %}
+        {% endif %}
+      </div>
+      <div class="rate-card__foot">
+        {% if changes_at_local %}
+          {% if hours.is_open %}
+            {% trans "تُغلق في" %} <span class="num">{{ changes_at_local|date:"Y-m-d H:i" }}</span>
+          {% else %}
+            {% trans "تُفتح في" %} <span class="num">{{ changes_at_local|date:"Y-m-d H:i" }}</span>
+          {% endif %}
+          <br><span class="helptext">{{ hours.timezone_name }}</span>
+        {% elif hours.is_overridden %}
+          {% trans "التجاوز اليدوي لا ينتهي وحده؛ أعِد الحالة إلى «اتبع المواعيد» لاستئناف الجدول." %}
+        {% else %}
+          {% trans "دوام على مدار الساعة، بلا وقت إغلاق." %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rate-card" style="animation-delay:.07s">
+      <div class="rate-card__label"><span>{% trans "الجدول المضبوط" %}</span></div>
+      <div class="rate-card__value num">{{ hours.open_time|time:"H:i" }} إلى {{ hours.close_time|time:"H:i" }}</div>
+      <div class="rate-card__unit">{{ hours.timezone_name }}</div>
+      <div class="rate-card__foot">
+        {% if always_open %}
+          {% trans "وقت الفتح والإغلاق متطابقان، ويُقرأ ذلك كدوام دائم." %}
+        {% elif overnight %}
+          {% trans "الدوام يمتد إلى ما بعد منتصف الليل." %}
+        {% else %}
+          {% trans "دوام ضمن اليوم نفسه." %}
+        {% endif %}
+        {% if hours.is_overridden %}
+          <br><span class="helptext">{% trans "معطّل حاليًا بتجاوز يدوي." %}</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="max-width:46rem; animation-delay:.12s">
+    <div class="panel__head">
+      <h2>{% trans "الضبط" %}</h2>
+      <p class="panel__note">{% trans "يسري التغيير فورًا على كل عميل يفتح البوابة بعده." %}</p>
+    </div>
+
+    <div class="panel__body">
+      <div class="warn-note">
+        <strong>◷</strong>
+        <span>
+          {% trans "الإغلاق يمنع تقديم الطلبات الجديدة فقط. الطلبات القائمة تبقى مفتوحة، ويظل العميل قادرًا على متابعتها والكتابة في محادثتها." %}
+        </span>
+      </div>
+
+      {% if can_set_hours %}
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% include "finance/_form_fields.html" with wide_fields="closed_message_ar override" %}
+          <div class="form-actions">
+            <button class="btn btn--primary" type="submit">{% trans "حفظ المواعيد" %}</button>
+            <a class="btn btn--ghost" href="{% url 'finance:dashboard' %}">{% trans "إلغاء" %}</a>
+          </div>
+        </form>
+      {% else %}
+        <dl class="meta-list">
+          <div>
+            <dt>{% trans "الحالة" %}</dt>
+            <dd>
+              {% if hours.is_overridden %}
+                {% if hours.is_open %}{% trans "مفتوح، بتجاوز المواعيد" %}{% else %}{% trans "مغلق، بتجاوز المواعيد" %}{% endif %}
+              {% else %}{% trans "اتبع المواعيد" %}{% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>{% trans "وقت الفتح" %}</dt>
+            <dd class="num">{{ hours.open_time|time:"H:i" }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "وقت الإغلاق" %}</dt>
+            <dd class="num">{{ hours.close_time|time:"H:i" }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "المنطقة الزمنية" %}</dt>
+            <dd>{{ hours.timezone_name }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "رسالة الإغلاق" %}</dt>
+            <dd>{{ hours.closed_message }}</dd>
+          </div>
+        </dl>
+        <p class="helptext" style="margin-top:1rem">
+          {% trans "تغيير المواعيد يحتاج صلاحية «تعديل إعدادات النظام». اطلبها من مدير مالي." %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel" style="max-width:46rem; animation-delay:.18s">
+    <div class="panel__head">
+      <h2>{% trans "ما يراه العميل عند الإغلاق" %}</h2>
+    </div>
+    <div class="panel__body">
+      <dl class="meta-list">
+        <div>
+          <dt>{% trans "النص" %}</dt>
+          <dd>{{ hours.closed_message }}</dd>
+        </div>
+        <div>
+          <dt>{% trans "العدّاد" %}</dt>
+          <dd>
+            {% if hours.is_overridden and not hours.is_open %}
+              {% trans "لا يظهر عدّاد؛ التجاوز اليدوي بلا وقت فتح معلوم." %}
+            {% else %}
+              {% trans "عدّ تنازلي حيّ حتى وقت الفتح، محسوب بساعة الخادم." %}
+            {% endif %}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+{% endblock %}

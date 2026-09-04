@@ -1,0 +1,115 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "أسعار الصرف" %}{% endblock %}
+{% block crumb %}{% trans "التسعير" %}{% endblock %}
+{% block heading %}{% trans "أسعار الصرف" %}{% endblock %}
+
+{% block actions %}
+  {% if can_set_rates %}
+    <a class="btn btn--primary" href="{% url 'finance:rate_create' %}">{% trans "ضبط سعر جديد" %}</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <div class="rate-cards">
+    <div class="rate-card {% if not deposit_rate %}rate-card--none{% endif %}">
+      <div class="rate-card__label">
+        <span>{% trans "الإيداع" %}</span>
+        {% if deposit_rate %}<span class="stamp">{% trans "سارٍ" %}</span>{% endif %}
+      </div>
+      <div class="rate-card__value">{% if deposit_rate %}{{ deposit_rate.iqd_per_usd|floatformat:"-2u" }}{% else %}···{% endif %}</div>
+      <div class="rate-card__unit">{% trans "دينار لكل دولار" %}</div>
+      <div class="rate-card__foot">
+        {% if deposit_rate %}
+          {% blocktrans with c=deposit_rate.commission_iqd_per_100usd|floatformat:"-2u" %}عمولة {{ c }} دينار لكل 100 دولار{% endblocktrans %}<br>
+          <span class="helptext">{% trans "منذ" %} {{ deposit_rate.effective_from|date:"Y-m-d H:i" }} · {{ deposit_rate.set_by.full_name|default:"···" }}</span>
+        {% else %}
+          {% trans "لم يُضبط بعد. لا يمكن تقديم طلبات إيداع." %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rate-card {% if not withdrawal_rate %}rate-card--none{% endif %}" style="animation-delay:.07s">
+      <div class="rate-card__label">
+        <span>{% trans "السحب" %}</span>
+        {% if withdrawal_rate %}<span class="stamp">{% trans "سارٍ" %}</span>{% endif %}
+      </div>
+      <div class="rate-card__value">{% if withdrawal_rate %}{{ withdrawal_rate.iqd_per_usd|floatformat:"-2u" }}{% else %}···{% endif %}</div>
+      <div class="rate-card__unit">{% trans "دينار لكل دولار" %}</div>
+      <div class="rate-card__foot">
+        {% if withdrawal_rate %}
+          {% blocktrans with c=withdrawal_rate.commission_iqd_per_100usd|floatformat:"-2u" %}عمولة {{ c }} دينار لكل 100 دولار{% endblocktrans %}<br>
+          <span class="helptext">{% trans "منذ" %} {{ withdrawal_rate.effective_from|date:"Y-m-d H:i" }} · {{ withdrawal_rate.set_by.full_name|default:"···" }}</span>
+        {% else %}
+          {% trans "لم يُضبط بعد. لا يمكن تقديم طلبات سحب." %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="animation-delay:.12s">
+    <form class="toolbar" method="get">
+      <label for="{{ filter_form.rate_type.id_for_label }}" style="font-size:.84rem;font-weight:700;color:var(--ink-2)">{% trans "النوع" %}</label>
+      {{ filter_form.rate_type }}
+      <button class="btn btn--sm" type="submit">{% trans "تصفية" %}</button>
+      {% if rate_type %}<a class="btn btn--sm btn--ghost" href="{% url 'finance:rate_list' %}">{% trans "الكل" %}</a>{% endif %}
+      <span class="spacer"></span>
+      <span class="helptext">{% trans "السجل غير قابل للتعديل أو الحذف؛ كل تغيير سطر جديد." %}</span>
+    </form>
+
+    <div class="panel__body panel__body--flush">
+      <ul class="strata">
+        {% for rate in history %}
+          {% if rate.pk in current_ids %}
+            <li class="strata__row strata__row--current">
+          {% elif rate.effective_from > now %}
+            <li class="strata__row strata__row--future">
+          {% else %}
+            <li class="strata__row strata__row--superseded">
+          {% endif %}
+            <div>
+              <strong>{{ rate.get_rate_type_display }}</strong>
+              {% if rate.pk in current_ids %}
+                <span class="stamp">{% trans "سارٍ الآن" %}</span>
+              {% elif rate.effective_from > now %}
+                <span class="state state--warn">{% trans "مجدول" %}</span>
+              {% else %}
+                <span class="state state--off">{% trans "مُستبدل" %}</span>
+              {% endif %}
+            </div>
+            <div class="strata__rate">{{ rate.iqd_per_usd|floatformat:"-2u" }}
+              <span class="helptext">{% trans "د/$" %}</span>
+            </div>
+            <div class="strata__rate">{{ rate.commission_iqd_per_100usd|floatformat:"-2u" }}
+              <span class="helptext">{% trans "عمولة/100$" %}</span>
+            </div>
+            <div class="strata__who">
+              <span class="strata__when">{{ rate.effective_from|date:"Y-m-d H:i" }}</span>
+              · {{ rate.set_by.full_name|default:_("···") }}
+              {% if rate.note %}<br><span class="helptext">{{ rate.note }}</span>{% endif %}
+            </div>
+          </li>
+        {% empty %}
+          <li>
+            <div class="empty">
+              {% trans "لا يوجد تاريخ أسعار بعد." %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  {% if is_paginated %}
+    <div class="form-actions" style="border:0;margin:0">
+      {% if page_obj.has_previous %}
+        <a class="btn btn--sm" href="?page={{ page_obj.previous_page_number }}{% if rate_type %}&rate_type={{ rate_type }}{% endif %}">{% trans "السابق" %}</a>
+      {% endif %}
+      <span class="helptext">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a class="btn btn--sm" href="?page={{ page_obj.next_page_number }}{% if rate_type %}&rate_type={{ rate_type }}{% endif %}">{% trans "التالي" %}</a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% if object %}{% trans "تعديل محفظة" %}{% else %}{% trans "محفظة جديدة" %}{% endif %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:merchant_detail' merchant.pk %}">{{ merchant.name }}</a> · {{ merchant_method.payment_method }}{% endblock %}
+{% block heading %}{% if object %}{% trans "تعديل محفظة" %}{% else %}{% trans "محفظة جديدة" %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel" style="max-width:44rem">
+  <div class="panel__head">
+    <h2>{{ merchant_method.payment_method }}</h2>
+    <p class="panel__note">{{ merchant.name }}</p>
+  </div>
+  <div class="panel__body">
+    {% if form.current_active %}
+      <div class="warn-note">
+        <strong>⚠</strong>
+        <span>
+          {% blocktrans with n=form.current_active.number %}المحفظة النشطة حاليًا هي <b class="num">{{ n }}</b>. تفعيل هذه المحفظة سيوقفها تلقائيًا، ويتغيّر الرقم المعروض على العملاء فورًا.{% endblocktrans %}
+        </span>
+      </div>
+    {% endif %}
+
+    {% comment %}multipart because a wallet can carry a QR. Without it the file
+    is dropped silently and the form saves as though nothing was attached.
+    {% endcomment %}
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {% include "finance/_form_fields.html" with wide_fields="qr_image" %}
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">{% trans "حفظ" %}</button>
+        <a class="btn btn--ghost" href="{% url 'finance:merchant_detail' merchant.pk %}">{% trans "إلغاء" %}</a>
+      </div>
+    </form>
+
+    {% comment %}The two pictures in this system are uploaded in two different
+    places for two different purposes, and saying so here is cheaper than
+    correcting it after a client has scanned a logo.{% endcomment %}
+    <div class="note" style="margin-top:1rem">
+      <p><strong>{% trans "رمز QR" %}</strong> —
+        {% trans "يُرفع هنا، لهذه المحفظة وحدها. يظهر للعميل كبيرًا في شاشة التفاصيل تحت عنوان «امسح رمز QR»، ويُمسح بالكاميرا." %}
+      </p>
+      <p><strong>{% trans "أيقونة الطريقة" %}</strong> —
+        {% trans "لا تُرفع هنا. مكانها" %}
+        <a href="{% url 'finance:payment_method_list' %}">{% trans "طرق الدفع" %}</a>،
+        {% trans "وهي علامة صغيرة بجانب اسم الطريقة للتعريف فقط، لا تُمسح ولا تُدفع بها." %}
+      </p>
+    </div>
+
+    <p class="helptext" style="margin-top:1rem">
+      {% trans "الطلبات القائمة تحتفظ برقم المحفظة كما عُرض وقت التقديم، ولا يتأثر بأي تعديل هنا." %}
+    </p>
+  </div>
+</div>
+{% endblock %}

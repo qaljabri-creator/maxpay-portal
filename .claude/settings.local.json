@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pip --version)",
+      "Bash(python -c \"import django; print\\(django.get_version\\(\\)\\)\")",
+      "Bash(psql --version)",
+      "Bash(cp .env.example .env)",
+      "Bash(\"C:/Dev/maxpay-portal/.venv/Scripts/python.exe\" manage.py makemigrations)"
+    ]
+  }
+}

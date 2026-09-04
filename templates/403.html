@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "غير مصرّح" %} · {% trans "بوابة MaxPay" %}{% endblock %}
+
+{% block body %}
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem 1rem">
+  <div class="panel" style="max-width:32rem;margin:0">
+    <div class="panel__head"><h2>{% trans "غير مصرّح" %}</h2></div>
+    <div class="panel__body">
+      <p>{% if exception %}{{ exception }}{% else %}{% trans "لا تملك صلاحية الوصول إلى هذه الصفحة." %}{% endif %}</p>
+      <p class="helptext">{% trans "إن كنت تحتاج هذه الصلاحية، اطلبها من مدير مالي." %}</p>
+      <div class="form-actions">
+        <a class="btn btn--primary" href="{% url 'finance:dashboard' %}">{% trans "العودة إلى اللوحة" %}</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

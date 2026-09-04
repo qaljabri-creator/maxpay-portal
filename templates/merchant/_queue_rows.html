@@ -1,0 +1,51 @@
+{% load i18n merchant_fmt %}
+{% comment %}
+The merchant queue's table body, on its own — build-order step 13.
+
+Included by merchant/queue.html on load, and served whole by
+merchant_panel:queue_rows when the ten-second poll notices something moved —
+which is what spec §8's "auto-refreshing via polling every 10 seconds" and spec
+§10's "new assigned request appears without page refresh" ask for.
+
+Every value here came out of MerchantRequestSummarySerializer, exactly as on
+the full page. There is no Request object in this template's context, so a live
+refresh carries no more client identity than a reload does (spec §2) — and the
+anonymity sweep visits this route like any other.
+{% endcomment %}
+{% for r in requests %}
+  <tr class="{% if r.reference in unread_refs %}is-unread{% endif %}"
+      style="animation-delay:{{ forloop.counter0 }}0ms">
+    <td class="primary-cell">
+      <a class="num" href="{% url 'merchant_panel:request_detail' r.reference %}">{{ r.reference }}</a>
+      {% if r.reference in unread_refs %}
+        <span class="dot" title="{% trans 'جديد منذ آخر اطّلاعك' %}" aria-label="{% trans 'غير مقروء' %}"></span>
+      {% endif %}
+    </td>
+    <td data-label="{% trans "النوع" %}"><span class="dir dir--{{ r.type }}">{{ r.type_label }}</span></td>
+    <td class="num" data-label="{% trans "المبلغ" %}">
+      {{ r.amount_iqd|floatformat:"0u" }}<span class="unit">{% trans "د.ع" %}</span>
+      <span class="sub-figure num">{{ r.amount_usd|floatformat:"2u" }} $</span>
+    </td>
+    <td data-label="{% trans "الطريقة" %}">{{ r.method }}</td>
+    <td class="num" data-label="{% trans "المحفظة / الوجهة" %}">
+      {% if r.type == "withdrawal" %}{{ r.destination_account|default:"···" }}
+      {% else %}{{ r.wallet_number|default:"···" }}{% endif %}
+    </td>
+    <td data-label="{% trans "الحالة" %}">
+      <span class="pip pip--{{ r.status }}">{{ r.status_label }}</span>
+      {% if r.needs_action %}<span class="state state--warn">{% trans "بانتظارك" %}</span>{% endif %}
+    </td>
+    <td class="num" data-label="{% trans "أُسند" %}">{{ r.assigned_at|when|default:"···" }}</td>
+    <td class="actions">
+      <a class="btn btn--sm btn--ghost" href="{% url 'merchant_panel:request_detail' r.reference %}">{% trans "فتح" %}</a>
+    </td>
+  </tr>
+{% empty %}
+  <tr>
+    <td colspan="8">
+      <div class="empty">
+        {% trans "لا توجد طلبات في هذا الطابور." %}
+      </div>
+    </td>
+  </tr>
+{% endfor %}

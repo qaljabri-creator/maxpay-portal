@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load static i18n %}
+
+{% comment %}The merchant's shell. It no longer shares the Finance panel's
+sheet: the two panels are different tools for different desks, and this one is
+built on the product identity that the client portal uses. It shares nothing
+else either, and never did: there is no client section in the rail because
+there is no client anywhere in this panel's data (spec §2).{% endcomment %}
+
+{% block stylesheet %}<link rel="stylesheet" href="{% static 'css/merchant.css' %}">{% endblock %}
+
+{% block title %}{% block page_title %}{% trans "لوحة التاجر" %}{% endblock %} · {% trans "بوابة MaxPay" %}{% endblock %}
+
+{% block body %}
+<div class="shell">
+  <aside class="rail">
+    <div class="rail__brand">
+      <a href="{% url 'merchant_panel:queue' %}" class="rail__mark">{% trans "MaxPay" %}</a>
+      <span class="rail__sub">{% trans "لوحة التاجر" %}</span>
+    </div>
+
+    <nav class="rail__nav">
+      <div class="rail__group">{% trans "العمل" %}</div>
+      <a class="rail__link {% if nav_section == 'requests' %}is-active{% endif %}"
+         href="{% url 'merchant_panel:queue' %}">
+        {% trans "الطلبات المُسندة" %}
+        {% comment %}Spec §10: a new assigned request appears without a page
+        refresh, with an unread badge. The first badge counts the work, the
+        second counts how much of it nobody has opened yet.{% endcomment %}
+        <span class="rail__badge" data-pulse="counts.awaiting_me"
+              data-pulse-hide-zero {% if not awaiting_me %}hidden{% endif %}>{{ awaiting_me }}</span>
+        <span class="rail__badge rail__badge--new" data-pulse="unread"
+              data-pulse-hide-zero hidden
+              title="{% trans 'جديد منذ آخر اطّلاعك' %}">0</span>
+      </a>
+
+      <div class="rail__group">{% trans "حسابي" %}</div>
+      <a class="rail__link {% if nav_section == 'wallets' %}is-active{% endif %}"
+         href="{% url 'merchant_panel:wallets' %}">
+        {% trans "محافظي" %}
+      </a>
+      <a class="rail__link {% if nav_section == 'reports' %}is-active{% endif %}"
+         href="{% url 'merchant_panel:report' %}">
+        {% trans "التقارير" %}
+      </a>
+    </nav>
+
+    <div class="rail__foot">
+      <span class="rail__user">{{ merchant_name }}</span>
+      <span class="rail__role">{% trans "تاجر" %}</span>
+      <div class="rail__links">
+        <a href="{% url 'two_factor:profile' %}">{% trans "الأمان" %}</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <div class="topbar__crumb">{% block crumb %}{% endblock %}</div>
+        <h1>{% block heading %}{% endblock %}</h1>
+      </div>
+      <div class="topbar__actions">{% block actions %}{% endblock %}</div>
+    </header>
+
+    <main class="content">
+      {% if messages %}
+        <ul class="flashes">
+          {% for message in messages %}
+            <li class="flash flash--{{ message.tags|default:'info' }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endblock %}

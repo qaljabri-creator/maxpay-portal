@@ -1,0 +1,339 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{{ req.public_ref }}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:request_list' %}">{% trans "طابور الطلبات" %}</a>{% endblock %}
+{% block heading %}<span class="num">{{ req.public_ref }}</span>{% endblock %}
+
+{% block actions %}
+  <span class="dir dir--{{ req.type }}">{{ req.get_type_display }}</span>
+  <span class="pip pip--{{ req.status }}">{{ req.get_status_display }}</span>
+{% endblock %}
+
+{% block content %}
+
+{% comment %}The lifecycle, in reading order. Rejection cancels the rest
+rather than pretending to know how far the request got.{% endcomment %}
+<ol class="track">
+  {% for step in track %}
+    <li class="track__step track__step--{{ step.state }}">
+      <span class="track__dot"></span>
+      <span class="track__label">{{ step.label }}</span>
+      {% if step.at %}<span class="track__at num">{{ step.at|date:"m-d H:i" }}</span>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
+
+{% if req.status == "rejected" %}
+  <div class="warn-note warn-note--danger">
+    <strong>{% trans "مرفوض" %}</strong>
+    <span>{{ req.rejection_reason }}</span>
+  </div>
+{% endif %}
+
+<div class="split">
+  <div class="split__main">
+
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الطلب" %}</h2></div>
+      <div class="panel__body">
+        <div class="figures">
+          <div class="figure">
+            <div class="figure__l">{% trans "يستلم العميل" %}</div>
+            <div class="figure__v num">{{ req.amount_usd|floatformat:"2u" }} <span class="unit">USD</span></div>
+          </div>
+          <div class="figure figure--lead">
+            <div class="figure__l">{% trans "يحوّل العميل" %}</div>
+            <div class="figure__v num">{{ req.amount_iqd|floatformat:"-2u" }} <span class="unit">{% trans "د.ع" %}</span></div>
+            <div class="figure__f num">
+              {{ converted_iqd|floatformat:"-2u" }} + {{ req.commission_applied|floatformat:"-2u" }}
+              <span class="unit">{% trans "عمولة" %}</span>
+            </div>
+          </div>
+          <div class="figure">
+            <div class="figure__l">{% trans "السعر المُلتقط" %}</div>
+            <div class="figure__v num">{{ req.rate_applied|floatformat:"-2u" }}</div>
+            <div class="figure__f">{% trans "دينار لكل دولار، وقت التقديم" %}</div>
+          </div>
+        </div>
+
+        <dl class="meta-list" style="margin-top:1.3rem">
+          <div>
+            <dt>{% trans "طريقة الدفع" %}</dt>
+            <dd>{{ req.payment_method }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "التاجر الذي اختاره العميل" %}</dt>
+            <dd>
+              <a href="{% url 'finance:merchant_detail' req.merchant_selected_id %}">{{ req.merchant_selected.name }}</a>
+              {% if not req.merchant_selected.is_active %}<span class="state state--off">{% trans "موقوف" %}</span>{% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>{% trans "التاجر المُسند" %}</dt>
+            <dd>
+              {% if req.merchant_assigned %}
+                <a href="{% url 'finance:merchant_detail' req.merchant_assigned_id %}">{{ req.merchant_assigned.name }}</a>
+                {% if rerouted %}<span class="state state--warn">{% trans "يختلف عن اختيار العميل" %}</span>{% endif %}
+              {% else %}
+                <span class="helptext">{% trans "لم يُسند بعد" %}</span>
+              {% endif %}
+            </dd>
+          </div>
+          {% if req.is_deposit %}
+            <div>
+              <dt>{% trans "المحفظة وقت التقديم" %}</dt>
+              <dd class="num">{{ req.wallet_number_snapshot|default:"···" }}</dd>
+            </div>
+          {% else %}
+            <div>
+              <dt>{% trans "حساب الوجهة" %}</dt>
+              <dd class="num">{{ req.destination_account|default:"···" }}</dd>
+            </div>
+          {% endif %}
+          <div>
+            <dt>{% trans "وقت التقديم" %}</dt>
+            <dd class="num">{{ req.submitted_at|date:"Y-m-d H:i" }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "آخر تحديث" %}</dt>
+            <dd class="num">{{ req.updated_at|date:"Y-m-d H:i" }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "وقت الحسم" %}</dt>
+            <dd class="num">{{ req.resolved_at|date:"Y-m-d H:i"|default:"···" }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "المدة" %}</dt>
+            <dd>{{ req.elapsed_display }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "آخر من عالجه" %}</dt>
+            <dd>{{ req.handled_by.full_name|default:"···" }}</dd>
+          </div>
+          {% if req.was_amount_corrected %}
+            <div>
+              <dt>{% trans "المبلغ المطلوب أصلًا" %}</dt>
+              <dd class="num">{{ req.submitted_amount_usd|floatformat:"2u" }} $</dd>
+            </div>
+          {% endif %}
+        </dl>
+
+        {% if wallet_usage %}
+          {% comment %}The cap is in IQD and is measured against what clients
+          actually transfer, so it is the number that decides whether this
+          merchant can still take deposits today.{% endcomment %}
+          <div class="cap {% if wallet_usage.is_full %}cap--full{% endif %}">
+            <div class="cap__head">
+              <span>{% trans "السقف اليومي لهذه المحفظة" %}</span>
+              <span class="num">
+                {{ wallet_usage.consumed|floatformat:"0u" }} / {{ wallet_usage.cap|floatformat:"0u" }}
+                <span class="unit">{% trans "د.ع" %}</span>
+              </span>
+            </div>
+            <div class="cap__track"><span class="cap__fill" style="width:{{ wallet_usage.percent }}%"></span></div>
+            <div class="cap__foot">
+              {% if wallet_usage.is_full %}
+                {% trans "بلغت المحفظة سقفها اليوم؛ لن تُعرض على عملاء جدد حتى الغد أو حتى يُرفع السقف." %}
+              {% else %}
+                {% blocktrans with left=wallet_usage.remaining|floatformat:"0u" %}يتبقى {{ left }} دينار اليوم.{% endblocktrans %}
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "تصحيح المبلغ" %}</h2>
+        <p class="panel__note">
+          {% trans "للحالة التي يطلب فيها العميل مبلغًا ويحوّل غيره. يُسعَّر المبلغ الجديد بالسعر الذي سُعِّر به الطلب أصلًا، لا بسعر اليوم، وتُعاد نسبة العمولة معه. يبقى المبلغ المطلوب أصلًا محفوظًا." %}
+        </p>
+      </div>
+      <div class="panel__body">
+        {% if amount_form %}
+          <form method="post" action="{% url 'finance:request_amount' req.public_ref %}" novalidate>
+            {% csrf_token %}
+            <div class="field">
+              <label for="{{ amount_form.amount_usd.id_for_label }}">{{ amount_form.amount_usd.label }}</label>
+              {{ amount_form.amount_usd }}
+              {{ amount_form.amount_usd.errors }}
+            </div>
+            <div class="field">
+              <label for="{{ amount_form.reason.id_for_label }}">{{ amount_form.reason.label }}</label>
+              {{ amount_form.reason }}
+            </div>
+            <div class="form-actions">
+              <button class="btn btn--primary" type="submit">{% trans "حفظ المبلغ المصحَّح" %}</button>
+            </div>
+          </form>
+        {% else %}
+          <p class="helptext">{% trans "لا يمكن تعديل المبلغ في حالة الطلب الحالية." %}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if attachments %}
+      <div class="panel">
+        <div class="panel__head">
+          <h2>{% trans "المرفقات" %}</h2>
+          <p class="panel__note">{% trans "روابط موقّعة قصيرة الأجل؛ تنتهي صلاحيتها بعد دقائق." %}</p>
+        </div>
+        <div class="panel__body">
+          <div class="proofs">
+            {% for item in attachments %}
+              <a class="proof" href="{{ item.url }}" target="_blank" rel="noopener">
+                {% if item.is_image %}
+                  <img class="proof__thumb" src="{{ item.url }}" alt="{{ item.obj.original_name }}" loading="lazy">
+                {% else %}
+                  <span class="proof__glyph">▤</span>
+                {% endif %}
+                <span class="proof__name">{{ item.obj.original_name|default:_("مرفق") }}</span>
+                <span class="proof__meta">
+                  {{ item.obj.get_uploaded_by_role_display }} · {{ item.obj.uploaded_at|date:"Y-m-d H:i" }}
+                </span>
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "المحادثة" %}</h2>
+        <p class="panel__note">{% trans "المالية ترى كل شيء، بما فيه الملاحظات الداخلية." %}</p>
+      </div>
+      <div class="panel__body">
+        <ul class="thread" id="thread" data-live-thread="{{ thread_url }}">
+          {% include "finance/_thread.html" %}
+        </ul>
+
+        {% if can_write %}
+          {% comment %}Spec §9: Finance writes into the thread as a third
+          participant. Two audiences behind one box, and the checkbox is the
+          whole difference, so the reminder above it is permanent rather than
+          conditional on anything the operator has already done.{% endcomment %}
+          <form class="composer" method="post" enctype="multipart/form-data"
+                action="{% url 'finance:request_message' req.public_ref %}">
+            {% csrf_token %}
+
+            <p class="composer__warn">
+              <span class="composer__warn-mark" aria-hidden="true">⚠</span>
+              <span>
+                <strong>{% trans "لا تذكر اسم العميل أو بريده أو رقم حسابه في نص الرسالة." %}</strong>
+                {% if merchant_reading %}
+                  {% blocktrans with merchant=merchant_reading %}يقرأ هذه الرسالة {{ merchant }} كما تكتبها بالضبط.{% endblocktrans %}
+                {% else %}
+                  {% trans "لم يُسند الطلب بعد، لكن التاجر الذي يُسند إليه لاحقًا يقرأ الخيط كاملًا." %}
+                {% endif %}
+                {% trans "إخفاء الهوية مفروض على الحقول، ولا يمكن فرضه على النص الحر. للتفاصيل التي تخص المالية استخدم «ملاحظة داخلية»." %}
+              </span>
+            </p>
+
+            <div class="composer__field">
+              <label class="sr-only" for="{{ message_form.body.id_for_label }}">{{ message_form.body.label }}</label>
+              {{ message_form.body }}
+              {{ message_form.body.errors }}
+            </div>
+
+            <div class="composer__row">
+              <label class="composer__file">
+                <span>{{ message_form.attachment.label }}</span>
+                {{ message_form.attachment }}
+              </label>
+              <label class="composer__check">
+                {{ message_form.is_internal_note }}
+                <span>{{ message_form.is_internal_note.label }}</span>
+              </label>
+              <button class="btn btn--primary" type="submit">{% trans "إرسال" %}</button>
+            </div>
+
+            <p class="composer__hint">
+              {{ message_form.is_internal_note.help_text }}
+              {{ message_form.attachment.help_text }}
+            </p>
+            {{ message_form.attachment.errors }}
+            {{ message_form.non_field_errors }}
+          </form>
+        {% else %}
+          <p class="helptext" style="margin-top:.9rem">
+            {% trans "حسابك لا يملك صلاحية الكتابة في المحادثة." %}
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <aside class="split__side">
+    {% if can_see_identity %}
+      <div class="panel panel--identity">
+        <div class="panel__head">
+          <h2>{% trans "العميل" %}</h2>
+          <span class="stamp">{% trans "للمالية فقط" %}</span>
+        </div>
+        <div class="panel__body">
+          <dl class="meta-list">
+            <div><dt>{% trans "الاسم" %}</dt><dd>{{ req.client.display_name|default:"···" }}</dd></div>
+            <div><dt>{% trans "البريد" %}</dt><dd class="num">{{ req.client.email|default:"···" }}</dd></div>
+            <div><dt>{% trans "رقم الحساب" %}</dt><dd class="num">{{ req.client.account_number|default:"···" }}</dd></div>
+            <div><dt>{% trans "معرّف B2CORE" %}</dt><dd class="num">{{ req.client.b2core_id }}</dd></div>
+          </dl>
+          {% comment %}Finance review 4.1: the history is reachable from any of
+          the client's requests, which is where the question "is this the third
+          time this week" actually gets asked.{% endcomment %}
+          <a class="btn btn--sm btn--ghost" style="margin-top:.8rem"
+             href="{% url 'finance:client_history' req.client_id %}">
+            {% trans "كل طلبات هذا العميل" %}
+          </a>
+          <p class="helptext" style="margin-top:.8rem">
+            {% trans "لا يظهر أي من هذا في لوحة التاجر ولا في أي استجابة موجّهة إليه." %}
+          </p>
+        </div>
+      </div>
+    {% else %}
+      <div class="panel">
+        <div class="panel__head"><h2>{% trans "العميل" %}</h2></div>
+        <div class="panel__body">
+          <p class="helptext">{% trans "حسابك لا يملك صلاحية الاطلاع على هوية العميل." %}</p>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الإجراءات" %}</h2></div>
+      <div class="panel__body">
+        {% if action_forms %}
+          {% for item in action_forms %}
+            <form class="act act--{{ item.move.tone }}" method="post"
+                  action="{% url 'finance:request_action' req.public_ref item.move.action %}">
+              {% csrf_token %}
+              {% if item.confirm %}<p class="act__why">{{ item.confirm }}</p>{% endif %}
+              {% for field in item.form %}
+                <div class="field">
+                  <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                  {{ field }}
+                  {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+                  {{ field.errors }}
+                </div>
+              {% endfor %}
+              <button class="btn {% if item.move.tone == 'danger' %}btn--danger{% elif item.move.tone == 'primary' %}btn--primary{% endif %}"
+                      type="submit">{{ item.move.label }}</button>
+            </form>
+          {% endfor %}
+        {% else %}
+          <p class="helptext">
+            {% if req.is_closed %}
+              {% trans "الطلب منتهٍ؛ لا توجد إجراءات متاحة." %}
+            {% else %}
+              {% trans "لا توجد إجراءات متاحة لك على هذا الطلب في حالته الحالية." %}
+            {% endif %}
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

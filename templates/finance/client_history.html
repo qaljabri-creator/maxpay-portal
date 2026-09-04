@@ -1,0 +1,172 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+{% comment %}
+Finance review 4.1 — every request by one client, and what they add up to.
+
+The most identifying screen in the system. It is behind
+`accounts.view_client_identity` in the view, not here, so there is no branch in
+this file that renders a masked version of it: there is no masked version. The
+rows come from the queue's own partial, so the history and the worklist cannot
+disagree about a request.
+{% endcomment %}
+
+{% block page_title %}{% trans "سجل العميل" %}{% endblock %}
+{% block crumb %}{% trans "الطلبات" %}{% endblock %}
+{% block heading %}{{ client_record }}{% endblock %}
+
+{% block actions %}
+  <a class="btn btn--sm btn--ghost" href="{{ report_url }}">{% trans "تقرير" %}</a>
+  {% if can_export %}
+    <a class="btn btn--primary" href="{{ export_url }}">{% trans "تصدير Excel" %}</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="panel">
+  <div class="panel__body">
+    <dl class="meta">
+      {% if client_record.display_name %}
+        <div class="meta__row">
+          <dt>{% trans "الاسم" %}</dt>
+          <dd>{{ client_record.display_name }}</dd>
+        </div>
+      {% endif %}
+      {% if client_record.email %}
+        <div class="meta__row">
+          <dt>{% trans "البريد" %}</dt>
+          <dd class="num">{{ client_record.email }}</dd>
+        </div>
+      {% endif %}
+      {% if client_record.account_number %}
+        <div class="meta__row">
+          <dt>{% trans "رقم الحساب" %}</dt>
+          <dd class="num">{{ client_record.account_number }}</dd>
+        </div>
+      {% endif %}
+      <div class="meta__row">
+        <dt>{% trans "معرّف B2CORE" %}</dt>
+        <dd class="num">{{ client_record.b2core_id }}</dd>
+      </div>
+      <div class="meta__row">
+        <dt>{% trans "أول طلب" %}</dt>
+        <dd>{% if first_request %}{{ first_request.submitted_at|date:"Y-m-d H:i" }}{% else %}{% trans "لا شيء بعد" %}{% endif %}</dd>
+      </div>
+      <div class="meta__row">
+        <dt>{% trans "آخر طلب" %}</dt>
+        <dd>{% if last_request %}{{ last_request.submitted_at|date:"Y-m-d H:i" }}{% else %}{% trans "لا شيء بعد" %}{% endif %}</dd>
+      </div>
+      <div class="meta__row">
+        <dt>{% trans "الحالة" %}</dt>
+        <dd>{% if client_record.is_active %}{% trans "نشط" %}{% else %}{% trans "موقوف" %}{% endif %}</dd>
+      </div>
+    </dl>
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.count }}</div>
+    <div class="kpi__l">{% trans "طلب" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.total_usd|floatformat:"2u" }}</div>
+    <div class="kpi__l">{% trans "إجمالي الدولار" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.total_iqd|floatformat:"-2u" }}</div>
+    <div class="kpi__l">{% trans "إجمالي الدينار" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__n">{{ summary.rejected }}</div>
+    <div class="kpi__l">{% trans "مرفوض، خارج الإجمالي" %}</div>
+  </div>
+</div>
+
+<div class="split">
+  <div class="panel">
+    <div class="panel__head">
+      <h2>{% trans "حسب النوع" %}</h2>
+    </div>
+    <div class="panel__body panel__body--flush">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "النوع" %}</th>
+            <th>{% trans "العدد" %}</th>
+            <th>{% trans "دولار" %}</th>
+            <th>{% trans "دينار" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary.by_type %}
+            <tr>
+              <td data-label="{% trans 'النوع' %}">{{ row.label }}</td>
+              <td class="num" data-label="{% trans 'العدد' %}">{{ row.count }}</td>
+              <td class="num" data-label="{% trans 'دولار' %}">{{ row.usd|floatformat:"2u" }}</td>
+              <td class="num" data-label="{% trans 'دينار' %}">{{ row.iqd|floatformat:"-2u" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="empty">{% trans "لا شيء بعد." %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel__head">
+      <h2>{% trans "حسب طريقة الدفع" %}</h2>
+    </div>
+    <div class="panel__body panel__body--flush">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "الطريقة" %}</th>
+            <th>{% trans "العدد" %}</th>
+            <th>{% trans "دولار" %}</th>
+            <th>{% trans "دينار" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in by_method %}
+            <tr>
+              <td data-label="{% trans 'الطريقة' %}">{{ row.method }}</td>
+              <td class="num" data-label="{% trans 'العدد' %}">{{ row.count }}</td>
+              <td class="num" data-label="{% trans 'دولار' %}">{{ row.usd|floatformat:"2u" }}</td>
+              <td class="num" data-label="{% trans 'دينار' %}">{{ row.iqd|floatformat:"-2u" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="empty">{% trans "لا شيء بعد." %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2>{% trans "كل الطلبات" %}</h2>
+    <span class="helptext">
+      {% blocktrans count n=paginator.count|default:requests|length %}طلب واحد{% plural %}{{ n }} طلب{% endblocktrans %}
+    </span>
+  </div>
+  {% comment %}The client column is dropped: every row on this page is the same
+  client, and repeating their name twenty-five times is a column that carries no
+  information and pushes the ones that do off a narrow screen.{% endcomment %}
+  {% include "finance/_queue_table.html" with hide_client_column=True %}
+</div>
+
+{% if is_paginated %}
+  <div class="pager">
+    {% if page_obj.has_previous %}
+      <a class="btn btn--sm" href="?page={{ page_obj.previous_page_number }}">{% trans "السابق" %}</a>
+    {% endif %}
+    <span class="helptext num">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a class="btn btn--sm" href="?page={{ page_obj.next_page_number }}">{% trans "التالي" %}</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

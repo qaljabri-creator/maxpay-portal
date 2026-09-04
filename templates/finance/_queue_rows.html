@@ -1,0 +1,85 @@
+{% load i18n %}
+{% comment %}
+The queue's table body, on its own — build-order step 13.
+
+Included by finance/request_list.html on load, and served whole by
+finance:request_rows when the ten-second poll notices something moved (spec
+§10). One template for both, so a live-refreshed queue is exactly what a reload
+would have produced.
+
+`unread_refs` is a set of public references, so the membership test is a set
+lookup per row rather than a query per row.
+{% endcomment %}
+{% for req in requests %}
+  {% comment %}`title` is the merchant's handback note, read by hovering the
+  row (Finance review 3.5). Taken from how Finance works in Zendesk today: the
+  daily reconciliation opens dozens of requests to find the two that have a
+  note, and this replaces that with a pause of the cursor. It is an internal
+  note, so it never renders anywhere a client or another merchant reads.
+  {% endcomment %}
+  <tr class="{% if req.public_ref in unread_refs %}is-unread{% endif %}{% if req.merchant_note %} has-note{% endif %}"
+      {% if req.merchant_note %}title="{{ req.merchant_note }}"{% endif %}
+      style="animation-delay:{{ forloop.counter0 }}0ms">
+    <td class="primary-cell">
+      <a class="num" href="{% url 'finance:request_detail' req.public_ref %}">{{ req.public_ref }}</a>
+      {% if req.public_ref in unread_refs %}
+        <span class="dot" title="{% trans 'جديد منذ آخر اطّلاعك' %}" aria-label="{% trans 'غير مقروء' %}"></span>
+      {% endif %}
+      {% if req.merchant_note %}
+        <span class="dot dot--note" aria-label="{% trans 'ملاحظة من التاجر' %}"></span>
+      {% endif %}
+      <span class="sub-figure">{{ req.display_title }}</span>
+    </td>
+    <td data-label="{% trans "النوع" %}">
+      <span class="dir dir--{{ req.type }}">{{ req.get_type_display }}</span>
+    </td>
+    <td class="num" data-label="{% trans "المبلغ" %}">
+      {{ req.amount_usd|floatformat:"2u" }}<span class="unit">$</span>
+      <span class="sub-figure num">{{ req.amount_iqd|floatformat:"0u" }} {% trans "د.ع" %}</span>
+    </td>
+    {% if can_see_identity and not hide_client_column %}
+      {% comment %}Dropped on a client's own history page, where every row is
+      the same person and the column carries nothing.{% endcomment %}
+      <td data-label="{% trans "العميل" %}">
+        <a href="{% url 'finance:client_history' req.client_id %}">{{ req.client }}</a>
+      </td>
+    {% endif %}
+    <td data-label="{% trans "الطريقة" %}">{{ req.payment_method }}</td>
+    <td data-label="{% trans "التاجر" %}">
+      {% if req.merchant_assigned %}
+        {{ req.merchant_assigned.name }}
+        {% if req.merchant_assigned_id != req.merchant_selected_id %}
+          <span class="helptext" title="{% trans 'اختار العميل تاجرًا آخر' %}">↺</span>
+        {% endif %}
+      {% else %}
+        <span class="helptext">{{ req.merchant_selected.name }} · {% trans "لم يُسند" %}</span>
+      {% endif %}
+    </td>
+    <td data-label="{% trans "الحالة" %}"><span class="pip pip--{{ req.status }}">{{ req.get_status_display }}</span></td>
+    <td class="num" data-label="{% trans "التقديم" %}">
+      {{ req.submitted_at|date:"Y-m-d H:i" }}
+      {% if req.resolved_at %}
+        <span class="sub-figure num">{% trans "حُسم" %} {{ req.resolved_at|date:"Y-m-d H:i" }}</span>
+      {% endif %}
+    </td>
+    <td data-label="{% trans "المُعالِج" %}">
+      {% if req.handled_by %}{{ req.handled_by.full_name }}
+      {% else %}<span class="helptext">···</span>{% endif %}
+    </td>
+    <td class="actions">
+      <a class="btn btn--sm btn--ghost" href="{% url 'finance:request_detail' req.public_ref %}">{% trans "فتح" %}</a>
+    </td>
+  </tr>
+{% empty %}
+  <tr>
+    <td colspan="10">
+      <div class="empty">
+        {% if has_filters %}
+          {% trans "لا يوجد طلب يطابق هذه التصفية." %}
+        {% else %}
+          {% trans "لا توجد طلبات في هذا الطابور." %}
+        {% endif %}
+      </div>
+    </td>
+  </tr>
+{% endfor %}

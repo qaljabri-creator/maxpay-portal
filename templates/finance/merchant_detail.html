@@ -1,0 +1,196 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{{ merchant.name }}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:merchant_list' %}">{% trans "التجار" %}</a>{% endblock %}
+{% block heading %}{{ merchant.name }}{% endblock %}
+
+{% block actions %}
+  {% if can_manage_merchants and not merchant.is_archived %}
+    <a class="btn" href="{% url 'finance:merchant_update' merchant.pk %}">{% trans "تعديل البيانات" %}</a>
+    <form class="inline-form" method="post" action="{% url 'finance:merchant_toggle' merchant.pk %}">
+      {% csrf_token %}
+      <button class="btn {% if merchant.is_active %}btn--danger{% else %}btn--primary{% endif %}" type="submit">
+        {% if merchant.is_active %}{% trans "إيقاف التاجر" %}{% else %}{% trans "تفعيل التاجر" %}{% endif %}
+      </button>
+    </form>
+  {% endif %}
+  {% comment %}There is no delete control here and there will not be. A
+  merchant's name on a request from last March is part of that request, and a
+  dangling reference is not a tidier database (spec §11).{% endcomment %}
+  {% if can_archive %}
+    <form class="inline-form" method="post" action="{% url 'finance:merchant_archive' merchant.pk %}">
+      {% csrf_token %}
+      {% if merchant.is_archived %}
+        <input type="hidden" name="restore" value="1">
+        <button class="btn btn--primary" type="submit">{% trans "إعادة من الأرشيف" %}</button>
+      {% else %}
+        <button class="btn btn--danger" type="submit"
+                data-confirm="{% trans 'سيختفي هذا التاجر من كل القوائم ومن اختيار العميل، ولن يُسند إليه طلب جديد. طلباته القائمة تبقى. هل تريد الأرشفة؟' %}">
+          {% trans "أرشفة التاجر" %}
+        </button>
+      {% endif %}
+    </form>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if merchant.is_archived %}
+    <div class="warn-note">
+      <strong>⚠</strong>
+      <span>
+        {% blocktrans with at=merchant.archived_at|date:"Y-m-d" by=merchant.archived_by.full_name|default:"···" %}مؤرشف منذ {{ at }} بيد {{ by }}. لا يظهر في أي قائمة ولا في اختيار العميل، ولا يُسند إليه طلب جديد. طلباته القائمة وسجله محفوظان كما هما.{% endblocktrans %}
+      </span>
+    </div>
+  {% elif not merchant.is_active %}
+    <div class="warn-note">
+      <strong>⚠</strong>
+      <span>{% trans "هذا التاجر موقوف: لن يظهر للعملاء في الطلبات الجديدة. الطلبات القائمة لا تتأثر." %}</span>
+    </div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="panel__head"><h2>{% trans "بيانات التاجر" %}</h2></div>
+    <div class="panel__body">
+      <dl class="meta-list">
+        <div>
+          <dt>{% trans "الحالة" %}</dt>
+          <dd>{% if merchant.is_active %}<span class="state state--on">{% trans "نشط" %}</span>{% else %}<span class="state state--off">{% trans "موقوف" %}</span>{% endif %}</dd>
+        </div>
+        <div>
+          <dt>{% trans "معرّف B2CORE" %}</dt>
+          {% comment %}`num` and dir="ltr" for the same reason the input has
+          them: an opaque Latin identifier read inside an RTL page.{% endcomment %}
+          <dd>{% if merchant.b2core_id %}<span class="num" dir="ltr">{{ merchant.b2core_id }}</span>{% else %}<span class="helptext">{% trans "غير مسجَّل" %}</span>{% endif %}</dd>
+        </div>
+        <div>
+          <dt>{% trans "حساب الدخول" %}</dt>
+          <dd>{% if merchant.user %}{{ merchant.user.full_name }} <span class="helptext num">{{ merchant.user.email }}</span>{% else %}<span class="helptext">{% trans "بلا حساب دخول" %}</span>{% endif %}</dd>
+        </div>
+        {% if merchant.notes %}
+          <div><dt>{% trans "ملاحظات" %}</dt><dd style="font-weight:400">{{ merchant.notes|linebreaksbr }}</dd></div>
+        {% endif %}
+      </dl>
+    </div>
+  </div>
+
+  <div class="panel" style="animation-delay:.06s">
+    <div class="panel__head">
+      <div>
+        <h2>{% trans "طرق الدفع والمحافظ" %}</h2>
+        <p class="panel__note">{% trans "محفظة واحدة فقط لكل طريقة تكون نشطة، وهي الرقم الذي يُعرض على العميل." %}</p>
+      </div>
+      {% if can_manage_merchants and unassigned_methods %}
+        <a class="btn btn--primary btn--sm" href="{% url 'finance:merchant_method_create' merchant.pk %}">{% trans "إسناد طريقة" %}</a>
+      {% endif %}
+    </div>
+
+    <div class="panel__body panel__body--flush">
+      {% for method in merchant.methods.all %}
+        <div class="toolbar">
+          <strong>{{ method.payment_method }}</strong>
+          {% if method.is_active %}
+            <span class="state state--on">{% trans "مفعّلة" %}</span>
+          {% else %}
+            <span class="state state--off">{% trans "موقوفة" %}</span>
+          {% endif %}
+          {% if not method.active_wallet %}
+            <span class="state state--warn">{% trans "بلا محفظة نشطة" %}</span>
+          {% endif %}
+          <span class="spacer"></span>
+          {% if can_manage_merchants %}
+            <a class="btn btn--sm" href="{% url 'finance:wallet_create' method.pk %}">{% trans "محفظة جديدة" %}</a>
+            <form class="inline-form" method="post" action="{% url 'finance:merchant_method_toggle' method.pk %}">
+              {% csrf_token %}
+              <button class="btn btn--sm {% if method.is_active %}btn--danger{% endif %}" type="submit">
+                {% if method.is_active %}{% trans "إيقاف" %}{% else %}{% trans "تفعيل" %}{% endif %}
+              </button>
+            </form>
+          {% endif %}
+        </div>
+
+        <div class="ledger-wrap">
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>{% trans "رقم المحفظة" %}</th>
+                <th>{% trans "التسمية" %}</th>
+                <th>{% trans "الحالة" %}</th>
+                <th>{% trans "السقف اليومي (د.ع)" %}</th>
+                <th>{% trans "أنشأها" %}</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for wallet in method.wallets.all %}
+                <tr class="{% if not wallet.is_active %}is-muted{% endif %}">
+                  <td class="num primary-cell">
+                    {% if wallet.number %}{{ wallet.number }}{% endif %}
+                    {% if wallet.qr_image %}
+                      <span class="state">{% trans "رمز QR" %}</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="{% trans "التسمية" %}">{{ wallet.label|default:"···" }}</td>
+                  <td data-label="{% trans "الحالة" %}">
+                    {% if wallet.is_active %}
+                      <span class="stamp">{% trans "المعروضة للعميل" %}</span>
+                    {% else %}
+                      <span class="state state--off">{% trans "موقوفة" %}</span>
+                      {% if wallet.deactivated_at %}
+                        <span class="helptext">{{ wallet.deactivated_at|date:"Y-m-d" }}</span>
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                  <td class="num" data-label="{% trans "السقف اليومي" %}">{% if wallet.daily_cap %}{{ wallet.daily_cap|floatformat:"-2u" }}{% else %}···{% endif %}</td>
+                  <td class="helptext" data-label="{% trans "أنشأها" %}">{{ wallet.created_by.full_name|default:"···" }}</td>
+                  <td class="actions">
+                    {% if can_manage_merchants %}
+                      <a class="btn btn--sm btn--ghost" href="{% url 'finance:wallet_update' wallet.pk %}">{% trans "تعديل" %}</a>
+                      {% if wallet.is_active %}
+                        <form class="inline-form" method="post" action="{% url 'finance:wallet_deactivate' wallet.pk %}">
+                          {% csrf_token %}
+                          <button class="btn btn--sm btn--danger" type="submit">{% trans "إيقاف" %}</button>
+                        </form>
+                      {% else %}
+                        <form class="inline-form" method="post" action="{% url 'finance:wallet_activate' wallet.pk %}">
+                          {% csrf_token %}
+                          <button class="btn btn--sm btn--primary" type="submit">{% trans "اجعلها النشطة" %}</button>
+                        </form>
+                      {% endif %}
+                    {% endif %}
+                    {% comment %}One button for two outcomes, because the
+                    operator is asking one question — get rid of this — and the
+                    data decides the answer. Which one happened is said in the
+                    message afterwards, and the confirmation says so up front
+                    too, so nobody presses it expecting the other.{% endcomment %}
+                    {% if can_archive %}
+                      <form class="inline-form" method="post" action="{% url 'finance:wallet_remove' wallet.pk %}">
+                        {% csrf_token %}
+                        <button class="btn btn--sm btn--danger" type="submit"
+                                data-confirm="{% trans 'إن لم يُقدَّم على هذه المحفظة أي طلب فستُحذف نهائيًا؛ وإن قُدِّم فستُؤرشف وتختفي من كل مكان. متابعة؟' %}">
+                          {% trans "حذف" %}
+                        </button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="6">
+                    <div class="empty">
+                      {% trans "لا توجد محافظ لهذه الطريقة بعد." %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% empty %}
+        <div class="empty">
+          {% trans "لم تُسند أي طريقة دفع لهذا التاجر." %}
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,231 @@
+{% extends "merchant/base.html" %}
+{% load i18n merchant_fmt %}
+
+{# `req` is a dictionary from MerchantRequestDetailSerializer, not a Request.
+   The masking spec §2 requires happened before this file was reached, and it is
+   the reason nothing here needs to remember to mask anything. #}
+
+{% block page_title %}{{ req.reference }}{% endblock %}
+{% block crumb %}<a href="{% url 'merchant_panel:queue' %}">{% trans "الطلبات المُسندة" %}</a>{% endblock %}
+{% block heading %}<span class="num">{{ req.reference }}</span>{% endblock %}
+
+{% block actions %}
+  <span class="dir dir--{{ req.type }}">{{ req.type_label }}</span>
+  <span class="pip pip--{{ req.status }}">{{ req.status_label }}</span>
+{% endblock %}
+
+{% block content %}
+
+<ol class="track">
+  {% for step in req.timeline %}
+    <li class="track__step track__step--{{ step.state }}">
+      <span class="track__dot"></span>
+      <span class="track__label">{{ step.label }}</span>
+      {% if step.at %}<span class="track__at num">{{ step.at|when:"m-d H:i" }}</span>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
+
+<div class="split">
+  <div class="split__main">
+
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الطلب" %}</h2></div>
+      <div class="panel__body">
+        <div class="figures">
+          <div class="figure figure--lead">
+            <div class="figure__l">
+              {% if req.type == "deposit" %}{% trans "المبلغ المستلَم" %}{% else %}{% trans "المبلغ المطلوب تحويله" %}{% endif %}
+            </div>
+            <div class="figure__v num">{{ req.amount_iqd|floatformat:"-2u" }} <span class="unit">{% trans "د.ع" %}</span></div>
+          </div>
+          <div class="figure">
+            <div class="figure__l">{% trans "ما يعادله" %}</div>
+            <div class="figure__v num">{{ req.amount_usd|floatformat:"2u" }} <span class="unit">USD</span></div>
+          </div>
+        </div>
+
+        <dl class="meta-list" style="margin-top:1.3rem">
+          <div>
+            <dt>{% trans "طريقة الدفع" %}</dt>
+            <dd>{{ req.method }}</dd>
+          </div>
+          {% if req.type == "deposit" %}
+            <div>
+              <dt>{% trans "المحفظة التي حُوّل إليها" %}</dt>
+              <dd class="num">{{ req.wallet_number|default:"···" }}</dd>
+            </div>
+          {% else %}
+            <div>
+              {% comment %}Spec §2: the merchant needs the destination to
+              execute the payment, and never learns whose it is.{% endcomment %}
+              <dt>{% trans "حساب الوجهة" %}</dt>
+              <dd class="num">{{ req.destination_account|default:"···" }}</dd>
+            </div>
+          {% endif %}
+          <div>
+            <dt>{% trans "وقت الإسناد إليك" %}</dt>
+            <dd class="num">{{ req.assigned_at|when|default:"···" }}</dd>
+          </div>
+          {% if req.merchant_actioned_at %}
+            <div>
+              <dt>{% trans "وقت تنفيذك" %}</dt>
+              <dd class="num">{{ req.merchant_actioned_at|when }}</dd>
+            </div>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "تصحيح المبلغ" %}</h2>
+        <p class="panel__note">
+          {% trans "للحالة التي يطلب فيها العميل مبلغًا ويحوّل غيره. يُسعَّر المبلغ الجديد بالسعر الذي سُعِّر به الطلب أصلًا، لا بسعر اليوم، وتُعاد نسبة العمولة معه. يبقى المبلغ المطلوب أصلًا محفوظًا." %}
+        </p>
+      </div>
+      <div class="panel__body">
+        {% if amount_form %}
+          <form method="post" action="{% url 'merchant_panel:request_amount' req.reference %}" novalidate>
+            {% csrf_token %}
+            <div class="field">
+              <label for="{{ amount_form.amount_usd.id_for_label }}">{{ amount_form.amount_usd.label }}</label>
+              {{ amount_form.amount_usd }}
+              {{ amount_form.amount_usd.errors }}
+            </div>
+            <div class="field">
+              <label for="{{ amount_form.reason.id_for_label }}">{{ amount_form.reason.label }}</label>
+              {{ amount_form.reason }}
+            </div>
+            <div class="form-actions">
+              <button class="btn btn--primary" type="submit">{% trans "حفظ المبلغ المصحَّح" %}</button>
+            </div>
+          </form>
+        {% else %}
+          <p class="helptext">{% trans "لا يمكن تعديل المبلغ في حالة الطلب الحالية." %}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if req.attachments %}
+      <div class="panel">
+        <div class="panel__head">
+          <h2>{% trans "المرفقات" %}</h2>
+          <p class="panel__note">{% trans "روابط موقّعة قصيرة الأجل؛ تنتهي صلاحيتها بعد دقائق." %}</p>
+        </div>
+        <div class="panel__body">
+          <div class="proofs">
+            {% for item in req.attachments %}
+              <a class="proof" href="{{ item.url }}" target="_blank" rel="noopener">
+                {% if item.is_image %}
+                  <img class="proof__thumb" src="{{ item.url }}" alt="{{ item.name }}" loading="lazy">
+                {% else %}
+                  <span class="proof__glyph">▤</span>
+                {% endif %}
+                <span class="proof__name">{{ item.name|default:_("مرفق") }}</span>
+                <span class="proof__meta">{{ item.uploaded_by }} · {{ item.uploaded_at|when }}</span>
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "المحادثة" %}</h2>
+        <p class="panel__note">
+          {% trans "يظهر المُرسل بصفته فقط: «العميل» أو «المالية». اكتب للعميل متى شئت، مهما كانت حالة الطلب." %}
+        </p>
+      </div>
+      <div class="panel__body">
+        <ul class="thread" id="thread" data-live-thread="{{ thread_url }}">
+          {% include "merchant/_thread.html" %}
+        </ul>
+
+        {% if can_write %}
+          {% comment %}Spec §9: two-way, and not gated on the request's
+          status. A merchant with a question after a request closed still has
+          one.{% endcomment %}
+          <form class="composer" method="post" enctype="multipart/form-data"
+                action="{% url 'merchant_panel:request_message' req.reference %}">
+            {% csrf_token %}
+
+            <div class="composer__field">
+              <label class="sr-only" for="{{ message_form.body.id_for_label }}">{{ message_form.body.label }}</label>
+              {{ message_form.body }}
+              {{ message_form.body.errors }}
+            </div>
+
+            <div class="composer__row">
+              <label class="composer__file">
+                <span>{{ message_form.attachment.label }}</span>
+                {{ message_form.attachment }}
+              </label>
+              <button class="btn btn--primary" type="submit">{% trans "إرسال" %}</button>
+            </div>
+
+            <p class="composer__hint">
+              {% trans "يقرأ رسالتك العميل وفريق المالية. المرفقات: صورة أو PDF." %}
+            </p>
+            {{ message_form.attachment.errors }}
+            {{ message_form.non_field_errors }}
+          </form>
+        {% else %}
+          <p class="helptext" style="margin-top:.9rem">
+            {% trans "حسابك لا يملك صلاحية المشاركة في المحادثة." %}
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <aside class="split__side">
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "العميل" %}</h2>
+        <span class="stamp">{% trans "مخفي" %}</span>
+      </div>
+      <div class="panel__body">
+        <p class="helptext">
+          {% trans "هوية العميل غير متاحة للتجار: لا اسم ولا رقم حساب ولا بريد ولا معرّف B2CORE. المرجع أعلاه هو ما تتعامل به مع المالية." %}
+        </p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الإجراءات" %}</h2></div>
+      <div class="panel__body">
+        {% if action_forms %}
+          {% for item in action_forms %}
+            <form class="act act--{{ item.move.tone }}" method="post" enctype="multipart/form-data"
+                  action="{% url 'merchant_panel:request_action' req.reference item.move.action %}">
+              {% csrf_token %}
+              {% if item.move.confirm %}<p class="act__why">{{ item.move.confirm }}</p>{% endif %}
+              {% for field in item.form %}
+                <div class="field">
+                  <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                  {{ field }}
+                  {% if field.help_text %}<span class="helptext">{{ field.help_text }}</span>{% endif %}
+                  {{ field.errors }}
+                </div>
+              {% endfor %}
+              <button class="btn {% if item.move.tone == 'danger' %}btn--danger{% elif item.move.tone == 'primary' %}btn--primary{% endif %}"
+                      type="submit">{{ item.move.label }}</button>
+            </form>
+          {% endfor %}
+        {% else %}
+          <p class="helptext">
+            {% if req.is_closed %}
+              {% trans "الطلب منتهٍ؛ لا توجد إجراءات متاحة." %}
+            {% else %}
+              {% trans "لا توجد إجراءات متاحة لك على هذا الطلب في حالته الحالية." %}
+            {% endif %}
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

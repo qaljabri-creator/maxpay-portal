@@ -1,0 +1,121 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+{% comment %}
+The audit log viewer (spec §9) — build-order step 12.
+
+There is no action column and no form. Spec §11 requires the log to have no
+delete or update path exposed anywhere in the application, and the plainest way
+to keep that true is for the screen to have nowhere to put one.
+{% endcomment %}
+
+{% block page_title %}{% trans "سجل التدقيق" %}{% endblock %}
+{% block crumb %}{% trans "الضبط والرقابة" %}{% endblock %}
+{% block heading %}{% trans "سجل التدقيق" %}{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <form class="toolbar toolbar--wrap" method="get">
+    {{ filter_form.q }}
+    {{ filter_form.action }}
+    {{ filter_form.target_type }}
+    {{ filter_form.actor }}
+    <label class="toolbar__pair">
+      <span>{% trans "من" %}</span>{{ filter_form.date_from }}
+    </label>
+    <label class="toolbar__pair">
+      <span>{% trans "إلى" %}</span>{{ filter_form.date_to }}
+    </label>
+    <button class="btn btn--sm" type="submit">{% trans "تصفية" %}</button>
+    {% if has_filters %}
+      <a class="btn btn--sm btn--ghost" href="{% url 'finance:audit_list' %}">{% trans "إلغاء التصفية" %}</a>
+    {% endif %}
+    <span class="spacer"></span>
+    <span class="helptext">
+      {% blocktrans count n=paginator.count %}قيد واحد{% plural %}{{ n }} قيد{% endblocktrans %}
+      · {% trans "السجل للقراءة فقط ولا يُعدَّل ولا يُحذف." %}
+    </span>
+  </form>
+
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "الوقت" %}</th>
+            <th>{% trans "الإجراء" %}</th>
+            <th>{% trans "المنفّذ" %}</th>
+            <th>{% trans "الهدف" %}</th>
+            <th>{% trans "ما تغيّر" %}</th>
+            <th>{% trans "IP" %}</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr style="animation-delay:{{ forloop.counter0 }}0ms">
+              <td class="num" data-label="{% trans "الوقت" %}">{{ row.entry.created_at|date:"Y-m-d H:i:s" }}</td>
+              <td class="primary-cell">
+                <span class="deed deed--{{ row.entry.action }}">{{ row.entry.get_action_display }}</span>
+              </td>
+              <td data-label="{% trans "المنفّذ" %}">
+                {% if row.entry.actor_label %}
+                  {{ row.entry.actor_label }}
+                {% elif row.entry.actor %}
+                  {{ row.entry.actor }}
+                {% else %}
+                  <span class="helptext">{% trans "النظام" %}</span>
+                {% endif %}
+              </td>
+              <td data-label="{% trans "الهدف" %}">
+                <span class="helptext">{{ row.type_label }}</span><br>
+                {% if row.target %}
+                  <a href="{{ row.target.url }}">{{ row.target.label }}</a>
+                {% else %}
+                  <span class="num">#{{ row.entry.target_id }}</span>
+                {% endif %}
+              </td>
+              <td data-label="{% trans "ما تغيّر" %}">
+                {% if row.changed %}
+                  {{ row.changed|join:"، " }}
+                {% elif row.entry.before %}
+                  <span class="helptext">{% trans "لا تغيير في القيم" %}</span>
+                {% else %}
+                  <span class="state state--on">{% trans "إنشاء" %}</span>
+                {% endif %}
+              </td>
+              <td class="num" data-label="{% trans "IP" %}">{{ row.entry.ip|default:"···" }}</td>
+              <td class="actions">
+                <a class="btn btn--sm btn--ghost" href="{% url 'finance:audit_detail' row.entry.pk %}">{% trans "التفاصيل" %}</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7">
+                <div class="empty">
+                  {% if has_filters %}
+                    {% trans "لا يوجد قيد يطابق هذه التصفية." %}
+                  {% else %}
+                    {% trans "السجل فارغ." %}
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if is_paginated %}
+  <div class="pager">
+    {% if page_obj.has_previous %}
+      <a class="btn btn--sm" href="?page={{ page_obj.previous_page_number }}&{{ querystring }}">{% trans "السابق" %}</a>
+    {% endif %}
+    <span class="helptext num">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a class="btn btn--sm" href="?page={{ page_obj.next_page_number }}&{{ querystring }}">{% trans "التالي" %}</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

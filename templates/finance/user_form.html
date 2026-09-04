@@ -1,0 +1,41 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% if is_create %}{% trans "حساب جديد" %}{% else %}{{ account.full_name }}{% endif %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:user_list' %}">{% trans "المستخدمون والأدوار" %}</a>{% endblock %}
+{% block heading %}{% if is_create %}{% trans "حساب داخلي جديد" %}{% else %}{% trans "تعديل بيانات الحساب" %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel" style="max-width:48rem">
+  <div class="panel__head">
+    <h2>{% if is_create %}{% trans "بيانات الحساب" %}{% else %}{{ account.email }}{% endif %}</h2>
+    {% if is_create %}
+      <p class="panel__note">
+        {% trans "لا تُكتب كلمة المرور هنا. يولّدها النظام ويعرضها مرة واحدة بعد الإنشاء، ويُطلب من المستخدم تغييرها عند أول دخول." %}
+      </p>
+    {% endif %}
+  </div>
+  <div class="panel__body">
+    {% if is_create %}
+      <div class="warn-note">
+        <strong>◷</strong>
+        <span>{% trans "لا يوجد تسجيل ذاتي لأي دور داخلي. كل حساب يُنشئه مدير مالي، وكل إنشاء يُسجَّل في سجل التدقيق." %}</span>
+      </div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "finance/_form_fields.html" %}
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">
+          {% if is_create %}{% trans "إنشاء الحساب" %}{% else %}{% trans "حفظ" %}{% endif %}
+        </button>
+        <a class="btn btn--ghost"
+           href="{% if is_create %}{% url 'finance:user_list' %}{% else %}{% url 'finance:user_detail' account.pk %}{% endif %}">
+          {% trans "إلغاء" %}
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

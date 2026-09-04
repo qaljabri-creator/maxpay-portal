@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% block page_title %}{% trans "لوحة المالية" %}{% endblock %} · {% trans "بوابة MaxPay" %}{% endblock %}
+
+{% block body %}
+<div class="shell">
+  <aside class="rail">
+    <div class="rail__brand">
+      <a href="{% url 'finance:dashboard' %}" class="rail__mark">{% trans "MaxPay" %}</a>
+      <span class="rail__sub">{% trans "لوحة المالية" %}</span>
+    </div>
+
+    <nav class="rail__nav">
+      <a class="rail__link {% if nav_section == 'overview' %}is-active{% endif %}"
+         href="{% url 'finance:dashboard' %}">
+        {% trans "نظرة عامة" %}
+      </a>
+
+      <div class="rail__group">{% trans "العمليات" %}</div>
+      <a class="rail__link {% if nav_section == 'requests' %}is-active{% endif %}"
+         href="{% url 'finance:request_list' %}">
+        {% trans "طابور الطلبات" %}
+        {% comment %}Rendered by the server and then kept current by the
+        poll, so the number is right with scripting off and right afterwards
+        with it on.{% endcomment %}
+        <span class="rail__badge" data-pulse="counts.awaiting_finance"
+              data-pulse-hide-zero {% if not queue_waiting %}hidden{% endif %}>{{ queue_waiting }}</span>
+        <span class="rail__badge rail__badge--new" data-pulse="unread"
+              data-pulse-hide-zero hidden
+              title="{% trans 'جديد منذ آخر اطّلاعك' %}">0</span>
+      </a>
+
+      <a class="rail__link {% if nav_section == 'reports' %}is-active{% endif %}"
+         href="{% url 'finance:report' %}">
+        {% trans "التقارير" %}
+      </a>
+
+      <div class="rail__group">{% trans "الشبكة" %}</div>
+      <a class="rail__link {% if nav_section == 'merchants' %}is-active{% endif %}"
+         href="{% url 'finance:merchant_list' %}">
+        {% trans "التجار والمحافظ" %}
+      </a>
+      <a class="rail__link {% if nav_section == 'payment_methods' %}is-active{% endif %}"
+         href="{% url 'finance:payment_method_list' %}">
+        {% trans "طرق الدفع" %}
+      </a>
+
+      <div class="rail__group">{% trans "التسعير" %}</div>
+      <a class="rail__link {% if nav_section == 'rates' %}is-active{% endif %}"
+         href="{% url 'finance:rate_list' %}">
+        {% trans "أسعار الصرف" %}
+      </a>
+
+      <div class="rail__group">{% trans "الضبط والرقابة" %}</div>
+      <a class="rail__link {% if nav_section == 'hours' %}is-active{% endif %}"
+         href="{% url 'finance:business_hours' %}">
+        {% trans "مواعيد العمل" %}
+        {% if portal_closed %}<span class="rail__badge rail__badge--off">{% trans "مغلق" %}</span>{% endif %}
+      </a>
+      <a class="rail__link {% if nav_section == 'integration' %}is-active{% endif %}"
+         href="{% url 'finance:b2core_integration' %}">
+        {% trans "تكامل B2CORE" %}
+      </a>
+      {% if can_manage_users %}
+        <a class="rail__link {% if nav_section == 'users' %}is-active{% endif %}"
+           href="{% url 'finance:user_list' %}">{% trans "المستخدمون والأدوار" %}</a>
+      {% endif %}
+      {% if can_view_audit %}
+        <a class="rail__link {% if nav_section == 'audit' %}is-active{% endif %}"
+           href="{% url 'finance:audit_list' %}">
+          {% trans "سجل التدقيق" %}
+        </a>
+      {% endif %}
+    </nav>
+
+    <div class="rail__foot">
+      <span class="rail__user">{{ request.user.full_name }}</span>
+      <span class="rail__role">{{ request.user.get_role_display }}</span>
+      <div class="rail__links">
+        <a href="{% url 'admin:index' %}">{% trans "الإدارة" %}</a>
+        <a href="{% url 'two_factor:profile' %}">{% trans "الأمان" %}</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <div class="topbar__crumb">{% block crumb %}{% endblock %}</div>
+        <h1>{% block heading %}{% endblock %}</h1>
+      </div>
+      <div class="topbar__actions">{% block actions %}{% endblock %}</div>
+    </header>
+
+    <main class="content">
+      {% if messages %}
+        <ul class="flashes">
+          {% for message in messages %}
+            <li class="flash flash--{{ message.tags|default:'info' }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endblock %}

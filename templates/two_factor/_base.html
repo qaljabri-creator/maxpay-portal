@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% comment %}
+Overrides the library's default, which pulls Bootstrap from a CDN. The portal
+must render with no third-party requests (spec §11).
+
+The styling that used to live here as an inline <style> block now sits in
+static/css/portal.css under `.auth-*`. It had to redeclare the palette inline
+to reach it, which meant this screen drifted from the panels every time they
+changed; and both a merchant and a finance operator land here, so it is the
+one page that has to look like the product without belonging to either panel.
+{% endcomment %}
+
+{% block body %}
+  <div class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-card__brand">
+        <span class="auth-card__mark">{% trans "بوابة MaxPay" %}</span>
+        <span class="auth-card__sub">{% trans "الدخول الداخلي" %}</span>
+      </div>
+
+      {% if messages %}
+        <ul class="flashes">
+          {% for message in messages %}
+            <li class="flash flash--{{ message.tags|default:'info' }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% block content_wrapper %}{% block content %}{% endblock %}{% endblock %}
+    </div>
+    <p class="auth-foot">{% trans "جميع الحسابات الداخلية تتطلب المصادقة الثنائية." %}</p>
+  </div>
+{% endblock %}

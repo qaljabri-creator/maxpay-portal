@@ -1,0 +1,219 @@
+{% extends "finance/base.html" %}
+{% load i18n static %}
+
+{% block page_title %}{{ account.full_name }}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:user_list' %}">{% trans "المستخدمون والأدوار" %}</a>{% endblock %}
+{% block heading %}{{ account.full_name }}{% endblock %}
+
+{% block extra_media %}
+  {% if issued_password %}<script src="{% static 'js/secret.js' %}" defer></script>{% endif %}
+{% endblock %}
+
+{% block actions %}
+  <span class="pip">{{ account.get_role_display }}</span>
+  {% if account.is_active %}
+    <span class="state state--on">{% trans "نشط" %}</span>
+  {% else %}
+    <span class="state state--off">{% trans "معطّل" %}</span>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+{% comment %}
+Shown once and never again: the password is popped out of the session by the
+view that rendered this page, so a refresh, a back button or any other screen
+gets nothing. That is the whole reason it is worth a loud block rather than a
+line in a table — there is no second chance to read it.
+{% endcomment %}
+{% if issued_password %}
+  <div class="secret">
+    <p class="secret__label">{% trans "كلمة المرور المؤقتة" %}</p>
+    <p class="secret__value" id="issued-password" dir="ltr">{{ issued_password }}</p>
+    <button type="button" class="btn btn--primary secret__copy"
+            id="secret-copy" data-copy-target="issued-password">
+      {% trans "نسخ كلمة المرور" %}
+    </button>
+    <p class="secret__note">
+      {% trans "تُعرض مرة واحدة فقط ولا تُخزَّن في أي مكان يمكن قراءته. سلّمها للمستخدم بقناة يثق بها، وسيُطلب منه تغييرها عند أول دخول." %}
+    </p>
+  </div>
+{% endif %}
+
+{% if is_self %}
+  <div class="warn-note">
+    <strong>⚠</strong>
+    <span>{% trans "هذا حسابك أنت. التعطيل وتغيير الدور وتعديل الصلاحيات معطّلة عليه، حتى لا يُقفل آخر مدير مالي خارج النظام." %}</span>
+  </div>
+{% endif %}
+
+<div class="split">
+  <div class="split__main">
+
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الحساب" %}</h2></div>
+      <div class="panel__body">
+        <dl class="meta-list">
+          <div><dt>{% trans "البريد الإلكتروني" %}</dt><dd class="num">{{ account.email }}</dd></div>
+          <div><dt>{% trans "رقم الهاتف" %}</dt><dd class="num">{{ account.phone|default:"···" }}</dd></div>
+          <div><dt>{% trans "الدور" %}</dt><dd>{{ account.get_role_display }}</dd></div>
+          <div>
+            <dt>{% trans "سجل التاجر" %}</dt>
+            <dd>
+              {% if account.merchant_profile %}
+                <a href="{% url 'finance:merchant_detail' account.merchant_profile.pk %}">{{ account.merchant_profile.name }}</a>
+              {% else %}
+                <span class="helptext">{% trans "بلا ربط" %}</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div><dt>{% trans "أنشأه" %}</dt><dd>{{ account.created_by.full_name|default:"···" }}</dd></div>
+          <div><dt>{% trans "تاريخ الإنشاء" %}</dt><dd class="num">{{ account.date_joined|date:"Y-m-d H:i" }}</dd></div>
+          <div><dt>{% trans "آخر دخول" %}</dt><dd class="num">{{ account.last_login|date:"Y-m-d H:i"|default:"···" }}</dd></div>
+          <div><dt>{% trans "آخر IP" %}</dt><dd class="num">{{ account.last_login_ip|default:"···" }}</dd></div>
+        </dl>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2>{% trans "الصلاحيات" %}</h2>
+        <p class="panel__note">
+          {% trans "الدور يمنح قاعدة، ويمكن منح صلاحية إضافية أو منع صلاحية يمنحها الدور. المنع يُطرح فعليًا وقت التحقق، لا شكليًا." %}
+        </p>
+      </div>
+      <div class="panel__body">
+        <dl class="meta-list">
+          <div>
+            <dt>{% trans "الصلاحيات السارية" %}</dt>
+            <dd class="num">{{ effective_count }}</dd>
+          </div>
+          <div>
+            <dt>{% trans "ممنوحة فوق الدور" %}</dt>
+            <dd>
+              {% if granted_extra %}
+                {% for label in granted_extra %}<span class="state state--on num">{{ label }}</span> {% endfor %}
+              {% else %}<span class="helptext">{% trans "لا شيء" %}</span>{% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>{% trans "ممنوعة رغم الدور" %}</dt>
+            <dd>
+              {% if denied %}
+                {% for label in denied %}<span class="state state--off num">{{ label }}</span> {% endfor %}
+              {% else %}<span class="helptext">{% trans "لا شيء" %}</span>{% endif %}
+            </dd>
+          </div>
+        </dl>
+        {% if can_manage_permissions and not is_self %}
+          <div class="form-actions">
+            <a class="btn" href="{% url 'finance:user_permissions' account.pk %}">{% trans "تعديل الصلاحيات" %}</a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if account.role == 'merchant' %}
+      <div class="panel">
+        <div class="panel__head">
+          <h2>{% trans "ربط سجل التاجر" %}</h2>
+          <p class="panel__note">{% trans "التاجر بلا سجل مربوط لا يرى أي طلب مهما أُسند إليه." %}</p>
+        </div>
+        <div class="panel__body">
+          <form method="post" action="{% url 'finance:user_action' account.pk 'link_merchant' %}">
+            {% csrf_token %}
+            <div class="field">
+              <label for="{{ merchant_form.merchant.id_for_label }}">{{ merchant_form.merchant.label }}</label>
+              {{ merchant_form.merchant }}
+            </div>
+            <div class="form-actions">
+              <button class="btn btn--primary" type="submit">{% trans "حفظ الربط" %}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <aside class="split__side">
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الدخول" %}</h2></div>
+      <div class="panel__body">
+        <dl class="meta-list">
+          <div>
+            <dt>{% trans "المصادقة الثنائية" %}</dt>
+            <dd>
+              {% if has_two_factor %}
+                <span class="state state--on">{% trans "مفعّلة" %}</span>
+              {% else %}
+                <span class="state state--off">{% trans "لم تُسجَّل" %}</span>
+              {% endif %}
+            </dd>
+          </div>
+          {% if account.two_factor_reset_at %}
+            <div>
+              <dt>{% trans "آخر إعادة تعيين" %}</dt>
+              <dd class="num">{{ account.two_factor_reset_at|date:"Y-m-d H:i" }}</dd>
+            </div>
+          {% endif %}
+          <div>
+            <dt>{% trans "كلمة المرور" %}</dt>
+            <dd>
+              {% if account.must_change_password %}
+                <span class="state state--off">{% trans "مؤقتة" %}</span>
+              {% else %}
+                <span class="state state--on">{% trans "اختارها المستخدم" %}</span>
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head"><h2>{% trans "الإجراءات" %}</h2></div>
+      <div class="panel__body">
+
+        <form class="act" method="post" action="{% url 'finance:user_action' account.pk 'reset_password' %}">
+          {% csrf_token %}
+          <p class="act__why">
+            {% trans "تُصدر كلمة مرور جديدة تُعرض مرة واحدة، ويُطلب من المستخدم تغييرها عند أول دخول. الجلسات المفتوحة تبقى كما هي." %}
+          </p>
+          <button class="btn btn--primary" type="submit">{% trans "إصدار كلمة مرور مؤقتة" %}</button>
+        </form>
+
+        {% if can_reset_two_factor %}
+          <form class="act act--danger" method="post" action="{% url 'finance:user_action' account.pk 'reset_two_factor' %}">
+            {% csrf_token %}
+            <p class="act__why">
+              {% trans "تُحذف كل أجهزة المصادقة الثنائية لهذا الحساب. لن يستطيع الدخول إلى أي شيء حتى يسجّل جهازًا جديدًا. استخدمه عند فقدان الهاتف فقط." %}
+            </p>
+            <button class="btn btn--danger" type="submit">{% trans "إعادة تعيين المصادقة الثنائية" %}</button>
+          </form>
+        {% endif %}
+
+        {% if not is_self %}
+          <form class="act {% if account.is_active %}act--danger{% endif %}" method="post"
+                action="{% url 'finance:user_action' account.pk account.is_active|yesno:'disable,enable' %}">
+            {% csrf_token %}
+            <p class="act__why">
+              {% if account.is_active %}
+                {% trans "التعطيل يمنع الدخول فورًا ولا يحذف شيئًا. تبقى كل قيود التدقيق مرتبطة بالحساب." %}
+              {% else %}
+                {% trans "يعود الحساب قابلًا للدخول بكلمة مروره وجهاز مصادقته الحاليين." %}
+              {% endif %}
+            </p>
+            <button class="btn {% if account.is_active %}btn--danger{% else %}btn--primary{% endif %}" type="submit">
+              {% if account.is_active %}{% trans "تعطيل الحساب" %}{% else %}{% trans "تفعيل الحساب" %}{% endif %}
+            </button>
+          </form>
+        {% endif %}
+
+        <div class="act">
+          <a class="btn" href="{% url 'finance:user_update' account.pk %}">{% trans "تعديل البيانات" %}</a>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

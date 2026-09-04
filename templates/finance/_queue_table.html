@@ -1,0 +1,34 @@
+{% load i18n %}
+{% comment %}
+The queue's table, headers and all — extracted so the request list and one
+client's history (Finance review 4.1) cannot drift apart. A request that looks
+one way in the worklist and another in the history is two renderings of one
+row, and the second one is always the one nobody updates.
+
+`rows_url` is the live-refresh endpoint and is optional: the queue polls, a
+history page does not, and the attribute is simply absent there rather than
+pointing at a URL that would refresh the wrong query.
+{% endcomment %}
+<div class="panel__body panel__body--flush">
+  <div class="ledger-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>{% trans "المرجع" %}</th>
+          <th>{% trans "النوع" %}</th>
+          <th>{% trans "المبلغ" %}</th>
+          {% if can_see_identity and not hide_client_column %}<th>{% trans "العميل" %}</th>{% endif %}
+          <th>{% trans "الطريقة" %}</th>
+          <th>{% trans "التاجر" %}</th>
+          <th>{% trans "الحالة" %}</th>
+          <th>{% trans "التقديم والحسم" %}</th>
+          <th>{% trans "المُعالِج" %}</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody{% if rows_url %} id="queue-rows" data-live-rows="{{ rows_url }}"{% endif %}>
+        {% include "finance/_queue_rows.html" %}
+      </tbody>
+    </table>
+  </div>
+</div>

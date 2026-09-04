@@ -1,0 +1,28 @@
+{% load i18n merchant_fmt %}
+{% comment %}
+The conversation on one request, on its own — build-order step 13.
+
+Included by merchant/request_detail.html on load, and served whole by
+merchant_panel:request_thread when the poll notices a new message (spec §10).
+
+`req` is the dictionary MerchantRequestDetailSerializer produced. The sender is
+a role label — «العميل», «المالية» — and never a person (spec §5). The composer
+is not in the fragment: a textarea being typed into is not something to replace
+every ten seconds.
+{% endcomment %}
+{% for message in req.messages %}
+  <li class="note note--{{ message.sender_role }}">
+    <div class="note__head">
+      <span class="note__who">{{ message.sender }}</span>
+      <span class="note__at num">{{ message.created_at|when }}</span>
+    </div>
+    {% if message.body %}<p class="note__body" dir="auto">{{ message.body|linebreaksbr }}</p>{% endif %}
+    {% if message.attachment %}
+      <a class="note__file" href="{{ message.attachment.url }}" target="_blank" rel="noopener">
+        {{ message.attachment.name|default:_("مرفق") }}
+      </a>
+    {% endif %}
+  </li>
+{% empty %}
+  <li class="empty">{% trans "لا توجد رسائل على هذا الطلب." %}</li>
+{% endfor %}

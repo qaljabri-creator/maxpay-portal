@@ -1,0 +1,1827 @@
+/* =========================================================================
+   MaxPay — the Finance panel, and the internal chrome around it
+   -------------------------------------------------------------------------
+   The supervisory desk (spec §9). Finance is the only surface that sees the
+   whole system: every request, every thread including the internal notes, the
+   identity behind each client, the rates that govern the money and the log of
+   who changed what. It is read for hours at a time, so it is dense, quiet, and
+   built to be scanned rather than admired.
+
+   The identity, fixed and shared with the other two surfaces:
+
+     black ground, one accent (#19FFFD), Cairo, dark only, Arabic RTL,
+     mobile first. No gradient anywhere, no second brand hue, no ornament.
+
+   How the accent is spent. This panel has more to say than the other two, so
+   the rule has to be stricter, not looser:
+
+     fill   what is waiting on this desk right now — the rail badge, the live
+            queue cell, "بانتظارك"-class flags, the primary action button.
+     edge   what is in force right now — the current rate, the wallet actually
+            shown to clients, the active tab, an unread row. This is what the
+            old sheet spent gold on, and it is a real distinction: *in force*
+            is not the same as *press me*, but both are worth the one colour
+            we have, and they never appear in the same component.
+     text   the values the desk governs and acts on: a reference, a rate, a
+            figure, a wallet number.
+
+   A request's status pip is cyan in exactly one panel at a time: the panel
+   whose desk it is currently sitting on. `assigned` is cyan for the merchant
+   and grey here; `submitted`, `under_review`, `merchant_confirmed` and
+   `merchant_paid` are cyan here and grey there. Scanning a queue for "mine"
+   is then the same gesture on both.
+
+   Everything else is three weights of grey. The one non-neutral besides the
+   accent is the error red, reserved for rejection, failed validation and a
+   failed login. Nothing is tinted just to look designed.
+
+   Two things the old sheet did with texture, this one does without, because
+   the identity has no gradients: an internal note and a scheduled rate are
+   marked by a dashed edge and a sunken ground instead of by hatching.
+
+   This sheet also dresses the pages either panel can land on — the 403 and
+   the two-factor screens — so a merchant passing through the login meets the
+   same product they are about to use.
+
+   The palette, the typeface and the reset are in static/css/system.css, which
+   every page here loads first; what is below is this panel alone. Self-contained
+   either way: the panels ship `default-src 'self'` (spec §11), so there is no
+   CDN and no third-party request anywhere.
+   ========================================================================= */
+
+/* The palette, the typeface and the reset live in system.css, which every
+   surface loads first. What stays here is this panel's own measure: a desk
+   tool fits more on a screen than a framed phone surface does, so the corners
+   are tighter and the target is a mouse target that a thumb still clears. */
+:root {
+  --radius:    12px;
+  --radius-sm: 9px;
+
+  /* Every control that can be pressed clears this. A merchant confirming a
+     payment on a phone gets the same target as one doing it at a desk. */
+  --tap: 2.75rem;
+
+  --rail-w: 15.5rem;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+a:hover { color: var(--accent); text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+h1, h2, h3, h4 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -.01em;
+}
+
+h1 { font-size: 1.4rem; }
+h2 { font-size: 1.05rem; }
+h3 { font-size: .95rem; }
+
+/* Figures are the subject matter of this panel, so they are tabular and
+   locked to LTR even though the page runs RTL. A reference, a rate and an IP
+   address must never be reordered by the bidi algorithm mid-string. */
+.num, .ledger td.num, input.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* --- where a figure sits ------------------------------------------------
+   `direction: ltr` above keeps a digit string from being reordered, and it
+   also redefines what `start` means: for these elements `text-align: start`
+   resolves to the *left*, which strands every number on the wrong side of the
+   panel from the label sitting above or beside it.
+
+   So the alignment is pinned to the physical edge the *document* reads from,
+   not the edge the element's own direction implies. Both directions are
+   spelled out rather than assuming Arabic, because the panel renders LTR when
+   the language is English. */
+.ledger th { text-align: start; }
+
+[dir="rtl"] .queue-cell__n,
+[dir="rtl"] .kpi__n,
+[dir="rtl"] .rate-card__value,
+[dir="rtl"] .strata__rate,
+[dir="rtl"] .figure__v,
+[dir="rtl"] .figure__f { text-align: right; }
+
+[dir="ltr"] .queue-cell__n,
+[dir="ltr"] .kpi__n,
+[dir="ltr"] .rate-card__value,
+[dir="ltr"] .strata__rate,
+[dir="ltr"] .figure__v,
+[dir="ltr"] .figure__f { text-align: left; }
+
+/* Table cells only once the table is a table: in the card layout below, a
+   numeric cell is deliberately aligned opposite its floated label. */
+@media (min-width: 62rem) {
+  [dir="rtl"] .ledger td.num { text-align: right; }
+  [dir="ltr"] .ledger td.num { text-align: left; }
+}
+
+/* Visually hidden, still read aloud. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.helptext, .field .helptext {
+  font-size: .8rem;
+  color: var(--ink-3);
+  line-height: 1.6;
+}
+
+
+/* =========================================================================
+   Shell
+   -------------------------------------------------------------------------
+   Mobile first: the rail starts as a strip across the top, and only becomes
+   a column once there is a screen wide enough to spare 15rem of it.
+   ========================================================================= */
+
+.shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+.rail {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.rail__brand {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .9rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.rail__mark {
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-decoration: none;
+  direction: ltr;
+}
+.rail__mark:hover { color: var(--accent); text-decoration: none; }
+
+.rail__sub { color: var(--ink-3); font-size: .78rem; }
+
+.rail__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  padding: .6rem .7rem;
+  flex: 1;
+}
+
+/* The group headings are a column's furniture. Across the top of a phone they
+   are just words in the way. */
+.rail__group { display: none; }
+
+.rail__link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: var(--tap);
+  padding: .4rem .8rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font-size: .88rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.rail__link:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
+
+.rail__link.is-active {
+  color: var(--accent);
+  border-color: var(--accent-edge);
+  background: var(--accent-wash);
+}
+
+/* Across the top of a phone the foot is one line, because every row it takes
+   is a row of queue somebody has to scroll past. */
+.rail__foot {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .3rem .7rem;
+  padding: .8rem 1.1rem;
+  border-top: 1px solid var(--line);
+  font-size: .8rem;
+  color: var(--ink-3);
+}
+
+.rail__links { display: flex; gap: .7rem; }
+.rail__user { color: var(--ink); font-weight: 700; }
+.rail__role { font-size: .74rem; letter-spacing: .05em; color: var(--ink-3); }
+.rail__foot a { color: var(--ink-2); }
+.rail__foot a:hover { color: var(--accent); }
+
+/* --- rail badges --------------------------------------------------------
+   Spec §10. The first counts the work waiting on this desk; the second counts
+   how much of it nobody has opened. Work waiting is the thing the panel exists
+   to surface, so the count fills and the "new" marker only outlines. */
+
+.rail__badge {
+  margin-inline-start: auto;
+  min-width: 1.5rem;
+  padding: 0 .4rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: .72rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.4rem;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.rail__badge--new {
+  margin-inline-start: .3rem;
+  background: transparent;
+  color: var(--accent);
+}
+
+/* The portal being shut is a state of the schedule, not an alarm, so it stays
+   neutral however much the desk wants to notice it. */
+.rail__badge--off {
+  margin-inline-start: auto;
+  border-color: var(--line-2);
+  background: transparent;
+  color: var(--ink-3);
+  letter-spacing: 0;
+}
+
+.rail__badge[hidden] { display: none; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .8rem;
+  padding: 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar__crumb { font-size: .78rem; letter-spacing: .04em; color: var(--ink-3); }
+.topbar__crumb a { color: var(--ink-3); text-decoration: none; }
+.topbar__crumb a:hover { color: var(--accent); }
+
+.topbar h1 { margin: 0; }
+
+.topbar__actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+
+.content { padding: 1.1rem 1.1rem 3rem; max-width: 84rem; width: 100%; }
+
+@media (min-width: 60rem) {
+  .shell { flex-direction: row; }
+
+  .rail {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    flex: none;
+    width: var(--rail-w);
+    height: 100vh;
+    border-bottom: 0;
+    border-inline-end: 1px solid var(--line);
+  }
+
+  .rail__nav { flex-direction: column; flex-wrap: nowrap; gap: .15rem; overflow-y: auto; }
+
+  .rail__group {
+    display: block;
+    margin: 1rem .8rem .35rem;
+    font-size: .7rem;
+    letter-spacing: .12em;
+    color: var(--ink-3);
+  }
+
+  .rail__link { display: flex; }
+
+  /* The active marker runs down the reading edge of the column, where the eye
+     already is. It replaces the tinted pill, which is a phone affordance. */
+  .rail__link.is-active { background: var(--accent-wash); border-color: transparent; }
+  .rail__link.is-active::before {
+    content: "";
+    position: absolute;
+    inset-block: .35rem;
+    inset-inline-start: -.4rem;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  .rail__foot { display: block; }
+  .rail__user { display: block; }
+  .rail__links { margin-top: .5rem; }
+
+  .topbar, .content { padding-inline: 2rem; }
+  .topbar { padding-block: 1.3rem; }
+  .content { padding-block: 1.6rem 3.5rem; }
+}
+
+
+/* =========================================================================
+   Flashes
+   ========================================================================= */
+
+.flashes { list-style: none; margin: 0 0 1.2rem; padding: 0; display: grid; gap: .5rem; }
+
+.flash {
+  padding: .7rem .9rem;
+  border: 1px solid var(--line-2);
+  border-inline-start: 2px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: .88rem;
+}
+
+.flash--success { border-inline-start-color: var(--accent); background: var(--accent-wash); }
+.flash--warning { border-inline-start-color: var(--accent); }
+.flash--error   { border-inline-start-color: var(--danger); background: var(--danger-wash); color: var(--danger); }
+
+
+/* =========================================================================
+   Panels
+   ========================================================================= */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 1.2rem;
+  overflow: hidden;
+  animation: rise .38s cubic-bezier(.22, 1, .36, 1) backwards;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The one panel in the product that holds a client's name. It is edged rather
+   than tinted: this is not an action, it is a privilege, and the stamp in its
+   head is what actually says so. */
+.panel--identity { border-color: var(--accent-edge); }
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  flex-wrap: wrap;
+  padding: .9rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel__head h2, .panel__head h3 { margin: 0; }
+
+.panel__body { padding: 1.1rem; }
+.panel__body--flush { padding: 0; }
+
+.panel__note {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: .82rem;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+
+/* =========================================================================
+   Tabs
+   ========================================================================= */
+
+.tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1.1rem; }
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  min-height: var(--tap);
+  padding: .35rem .9rem;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: .87rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tab:hover { color: var(--ink); border-color: var(--ink-3); text-decoration: none; }
+
+.tab.is-active {
+  color: var(--accent);
+  border-color: var(--accent-edge);
+  background: var(--accent-wash);
+}
+
+.tab__n {
+  min-width: 1.4rem;
+  padding: 0 .35rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  font-size: .74rem;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.tab.is-active .tab__n { background: var(--accent); color: var(--accent-ink); }
+
+
+/* =========================================================================
+   Toolbars — the filter rows above a ledger
+   ========================================================================= */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  padding: .8rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar--wrap { row-gap: .5rem; }
+.toolbar .spacer { flex: 1 1 auto; }
+
+.toolbar__pair {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .82rem;
+  color: var(--ink-3);
+}
+
+.toolbar input[type="search"],
+.toolbar input[type="text"],
+.toolbar input[type="date"],
+.toolbar select {
+  min-height: var(--tap);
+  padding: .4rem .7rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: .88rem;
+}
+
+.toolbar input::placeholder { color: var(--ink-3); }
+
+.toolbar input:focus-visible, .toolbar select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* The native calendar and clear glyphs are drawn dark-on-dark by the browser
+   and vanish on this ground. */
+.toolbar input[type="date"]::-webkit-calendar-picker-indicator,
+.field input[type="date"]::-webkit-calendar-picker-indicator,
+.field input[type="time"]::-webkit-calendar-picker-indicator,
+.field input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: .55;
+  cursor: pointer;
+}
+.toolbar input[type="search"]::-webkit-search-cancel-button { filter: invert(1); opacity: .5; }
+
+
+/* =========================================================================
+   The ledger
+   -------------------------------------------------------------------------
+   Two layouts from one markup. Below 62rem every row becomes a card and each
+   cell states its own label, because nine columns on a phone is a table
+   nobody reads and a horizontal scrollbar nobody finds. Above it, the table
+   is a table.
+
+   The labels come from `data-label` on each cell, so the fragment the poll
+   swaps in every ten seconds carries them too and a live-refreshed row looks
+   exactly like a rendered one.
+   ========================================================================= */
+
+.ledger-wrap { overflow-x: auto; }
+
+.ledger { width: 100%; border-collapse: collapse; font-size: .9rem; }
+
+.ledger th {
+  padding: .6rem .9rem;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--ink-3);
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.ledger td { padding: .7rem .9rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+
+.ledger tbody tr { animation: rise .38s cubic-bezier(.22, 1, .36, 1) backwards; }
+.ledger tbody tr:hover { background: var(--surface-2); }
+.ledger tbody tr:last-child td { border-bottom: 0; }
+
+.ledger .actions { text-align: end; white-space: nowrap; }
+.ledger .actions .btn + .btn,
+.ledger .actions .btn + .inline-form { margin-inline-start: .3rem; }
+.ledger .primary-cell { font-weight: 700; }
+.ledger .primary-cell a { text-decoration: none; }
+.ledger .primary-cell a:hover { text-decoration: underline; }
+
+.ledger caption { caption-side: top; padding: .6rem .9rem; color: var(--ink-3); font-size: .8rem; text-align: start; }
+
+/* A row that is switched off. Dimmed rather than struck through: it is still
+   a record, it is just not in play. */
+.ledger tr.is-muted td { color: var(--ink-3); }
+.ledger tr.is-current { background: var(--accent-row); }
+
+/* A row nobody has opened since it last moved. An edge and a wash, not a
+   weight change: the queue is read by running down one column, and bolding
+   every cell of a row makes the table louder rather than the row findable. */
+.ledger tbody tr.is-unread { background: var(--accent-row); }
+
+/* `border-inline-start`, not an inset shadow. The first cell of an RTL row is
+   the rightmost one, and a shadow offset in physical pixels puts the marker on
+   that cell's *left* edge — a cyan line down the middle of the table instead
+   of down the edge the eye reads from. */
+.ledger tbody tr.is-unread td:first-child {
+  border-inline-start: 2px solid var(--accent);
+  padding-inline-start: calc(.9rem - 2px);
+}
+
+.sub-rows td { background: var(--surface-2); }
+
+.dot {
+  display: inline-block;
+  width: .45rem;
+  height: .45rem;
+  margin-inline-start: .4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+/* 3.5. A merchant left a note on this request. Hollow rather than filled: the
+   unread dot beside it is the one that means "act", and two solid dots on one
+   row would be two things shouting the same way about different facts. The
+   note itself is the row's `title`, so the marker only has to say there is
+   one. */
+.dot--note {
+  background: none;
+  border: 1px solid var(--accent);
+}
+
+/* A row carrying a note is worth finding at a glance during reconciliation,
+   but it is not work waiting — so it gets a cursor and a hairline, not a
+   tint. */
+.ledger tbody tr.has-note { cursor: help; }
+.ledger tbody tr.has-note td:last-child { box-shadow: inset -2px 0 0 0 var(--accent-edge); }
+
+/* --- the card layout ---------------------------------------------------- */
+
+@media (max-width: 61.99rem) {
+  .ledger-wrap { overflow-x: visible; }
+
+  .ledger, .ledger tbody, .ledger tr, .ledger td { display: block; width: 100%; }
+  .ledger thead { display: none; }
+
+  .ledger tbody tr {
+    margin: .7rem;
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+
+  .ledger tbody tr:hover { background: var(--surface-2); }
+
+  .ledger td {
+    padding: .5rem .8rem;
+    border-bottom: 1px solid var(--line);
+    /* The value sits against the far edge, the label against the reading one.
+       `end` rather than a physical side so this still holds if the panel is
+       ever rendered left to right. */
+    text-align: end;
+  }
+
+  .ledger tbody tr td:last-child { border-bottom: 0; }
+
+  /* The label floats rather than being a flex item, so everything else in the
+     cell stays ordinary inline content and flows as one line. A flex cell made
+     each span its own item and blew a figure and its unit apart across the
+     row. */
+  .ledger td[data-label]::before {
+    content: attr(data-label);
+    float: right;
+    margin-inline-end: 1rem;
+    color: var(--ink-3);
+    font-size: .76rem;
+    font-weight: 600;
+  }
+  [dir="ltr"] .ledger td[data-label]::before { float: left; }
+  .ledger td[data-label]::after { content: ""; display: block; clear: both; }
+
+  /* An empty cell would otherwise be a label with nothing beside it. */
+  .ledger td[data-label]:empty { display: none; }
+
+  .ledger td.primary-cell {
+    padding-block: .65rem;
+    background: var(--surface);
+    font-size: 1rem;
+    text-align: start;
+  }
+
+  .ledger .actions { text-align: start; }
+  .ledger .actions .btn { width: 100%; }
+  .ledger .actions .btn + .btn,
+  .ledger .actions .btn + .inline-form { margin-inline-start: 0; margin-top: .4rem; }
+  .ledger .actions .inline-form { display: block; margin-top: .4rem; }
+  .ledger .actions .inline-form .btn { width: 100%; }
+
+  /* The empty state spans a card that has no cells to label. */
+  .ledger td[colspan] { padding: 0; text-align: center; }
+  .ledger tbody tr:has(td[colspan]) { border: 0; background: none; margin: 0; }
+
+  .ledger tbody tr.is-unread td:first-child { border-inline-start: 0; padding-inline-start: .8rem; }
+  .ledger tbody tr.is-unread { border-color: var(--accent-edge); }
+}
+
+.empty { padding: 2rem 1rem; color: var(--ink-3); font-size: .9rem; text-align: center; }
+
+
+/* =========================================================================
+   Row atoms — direction, status, state, stamp, audit action
+   ========================================================================= */
+
+/* Direction is a fact, not a priority, so neither half of it takes the
+   accent. The arrow carries the meaning. */
+.dir {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .12rem .55rem;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dir--deposit::before    { content: "↓"; color: var(--ink); }
+.dir--withdrawal::before { content: "↑"; color: var(--ink); }
+
+.pip {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .12rem .6rem;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pip::before { content: ""; width: .4rem; height: .4rem; border-radius: 50%; background: currentColor; }
+
+/* The four states where the ball is with Finance. Cyan here and grey in the
+   merchant panel, so "mine" is the same gesture on both. */
+.pip--submitted,
+.pip--under_review,
+.pip--pending,
+.pip--merchant_confirmed,
+.pip--merchant_paid {
+  color: var(--accent);
+  border-color: var(--accent-edge);
+  background: var(--accent-wash);
+}
+
+/* Out with a merchant. Finance can see it and has nothing to do about it. */
+.pip--assigned { color: var(--ink-2); }
+
+.pip--credited { color: var(--ink); }
+
+/* Ended, both of them, and neither needs finding in a queue. Cancelled is not
+   red: nothing failed, it stopped being wanted, and colouring it like a
+   rejection would make a month of tidy-ups read as a month of problems. */
+.pip--closed,
+.pip--cancelled { color: var(--ink-3); border-color: var(--line); }
+
+.pip--rejected { color: var(--danger); border-color: var(--danger); background: var(--danger-wash); }
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  padding: .12rem .55rem;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: .76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.state--on  { color: var(--accent); border-color: var(--accent-edge); }
+.state--off { color: var(--ink-3); }
+
+/* Something the desk has to deal with. The one state that fills. */
+.state--warn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+/* "In force right now" — the live rate, the wallet actually shown to clients,
+   the field that moved in an audit entry, the identity panel's privilege.
+   Spaced and outlined like a rubber stamp, and never filled: it marks a fact
+   about the world, not a button. */
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  padding: .1rem .6rem;
+  border: 1px dashed var(--accent-edge);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  white-space: nowrap;
+}
+
+.unit { margin-inline-start: .25rem; font-size: .74rem; color: var(--ink-3); font-weight: 600; }
+.sub-figure { display: block; font-size: .76rem; color: var(--ink-3); }
+
+/* An audit action is a category, not a priority. Ten of them, and colouring
+   them apart would turn the log into bunting; the filter above the table is
+   what narrows it. The one exception is a failed login, which is the only row
+   in the log that reports something going wrong. */
+.deed {
+  display: inline-flex;
+  align-items: center;
+  padding: .12rem .6rem;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: .77rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.deed--login_failed { color: var(--danger); border-color: var(--danger); background: var(--danger-wash); }
+
+
+/* =========================================================================
+   Buttons
+   ========================================================================= */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  min-height: var(--tap);
+  padding: .4rem 1rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: .88rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+
+.btn:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.btn--primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  filter: brightness(1.12);
+}
+
+.btn--danger { color: var(--danger); border-color: var(--danger); background: var(--danger-wash); }
+.btn--danger:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-wash); filter: brightness(1.15); }
+
+.btn--ghost { border-color: transparent; color: var(--accent); }
+.btn--ghost:hover { border-color: var(--accent-edge); background: var(--accent-wash); }
+
+.btn--sm { min-height: 2.25rem; padding: .25rem .75rem; font-size: .8rem; }
+
+.btn[disabled], .btn.is-disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
+
+.inline-form { display: inline; }
+
+.pager, .form-actions {
+  display: flex;
+  gap: .6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pager { justify-content: center; margin-top: 1rem; }
+
+.form-actions {
+  margin-top: 1.4rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+
+/* =========================================================================
+   Forms
+   ========================================================================= */
+
+.form-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem 1.4rem; }
+
+@media (min-width: 45rem) {
+  .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form-grid .field--wide { grid-column: 1 / -1; }
+}
+
+.field { display: flex; flex-direction: column; gap: .35rem; }
+
+.field > label { font-size: .84rem; font-weight: 600; color: var(--ink-2); }
+
+.field input, .field select, .field textarea,
+.composer__field textarea {
+  width: 100%;
+  min-height: var(--tap);
+  padding: .55rem .75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  /* 16px, so focusing a field does not zoom the viewport on iOS. */
+  font-size: 1rem;
+}
+
+.field textarea, .composer__field textarea { min-height: 5rem; resize: vertical; line-height: 1.65; }
+
+.field input::placeholder,
+.field textarea::placeholder,
+.composer__field textarea::placeholder { color: var(--ink-3); }
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible,
+.composer__field textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.field--check { flex-direction: row; align-items: center; gap: .5rem; }
+.field--check > label { font-weight: 600; color: var(--ink); }
+.field--check input {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+  transform: scale(1.2);
+}
+
+/* Django renders a bare file input. Its button is drawn by the OS in the OS's
+   own light-mode colours, which on a black panel is the one bright white
+   rectangle on the screen. */
+.field input[type="file"] { padding: .5rem .6rem; line-height: 1.5; }
+
+.field input[type="file"]::file-selector-button,
+.composer__file input::file-selector-button {
+  margin-inline-end: .7rem;
+  padding: .3rem .85rem;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.field input[type="file"]::file-selector-button:hover,
+.composer__file input::file-selector-button:hover { border-color: var(--accent); color: var(--accent); }
+
+ul.errorlist {
+  list-style: none;
+  margin: .35rem 0 0;
+  padding: 0;
+  color: var(--danger);
+  font-size: .82rem;
+}
+
+.form-errors {
+  margin-bottom: 1.1rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-wash);
+  color: var(--danger);
+  font-size: .88rem;
+}
+
+/* A standing notice: a condition of the screen rather than something that has
+   gone wrong. Neutral, because on a black panel full-brightness text inside a
+   ruled box is already the loudest thing that is not cyan. */
+.warn-note {
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  margin-bottom: 1.2rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--line-2);
+  border-inline-start: 2px solid var(--ink-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: .85rem;
+  line-height: 1.65;
+}
+
+.warn-note strong { flex: none; color: var(--ink); }
+
+.warn-note--danger {
+  border-color: var(--danger);
+  border-inline-start-color: var(--danger);
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+.warn-note--danger strong { color: var(--danger); }
+
+
+/* =========================================================================
+   The overview
+   ========================================================================= */
+
+.queue-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: .8rem;
+  margin-bottom: 1.4rem;
+}
+
+.queue-cell {
+  display: block;
+  padding: .9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+}
+
+.queue-cell:hover { border-color: var(--accent); text-decoration: none; color: inherit; }
+
+/* Work is actually waiting on this desk. The one cell of the strip that is
+   allowed to be cyan, and it is only cyan when the number is not zero. */
+.queue-cell--live { border-color: var(--accent-edge); background: var(--accent-wash); }
+.queue-cell--live .queue-cell__n { color: var(--accent); }
+
+.queue-cell__n {
+  display: block;
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.queue-cell__l { font-size: .8rem; color: var(--ink-3); }
+
+.rate-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.4rem;
+}
+
+.rate-card {
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  animation: rise .45s cubic-bezier(.22, 1, .36, 1) backwards;
+}
+
+/* Nothing is set, which on this screen means a direction of the product is
+   switched off. That is a fault, not a state. */
+.rate-card--none { border-color: var(--danger); }
+.rate-card--none .rate-card__value { color: var(--danger); }
+
+.rate-card__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .7rem;
+  font-size: .8rem;
+  color: var(--ink-3);
+}
+
+/* The governing number. There are only two on the screen and the whole desk
+   turns on them, so they get the accent as text.
+
+   `plaintext` rather than the forced `ltr` the other figures take, because
+   this slot does not always hold a figure: on the business-hours screen it is
+   "09:00 إلى 21:00", and an Arabic word *between* two times is the one shape
+   `direction: ltr` gets wrong. The trailing digits pick up Arabic-number type
+   from the word before them (UBA W2), resolve a level below it, and the line
+   comes out as "09:00 21:00 إلى". Letting the content pick its own paragraph
+   direction fixes it, and a bare figure still has no strong character, so it
+   still reads left to right. The alignment is pinned above and does not move
+   with it. */
+.rate-card__value {
+  margin-top: .3rem;
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: plaintext;
+}
+
+.rate-card__unit { font-size: .82rem; color: var(--ink-2); }
+
+.rate-card__foot {
+  margin-top: .7rem;
+  padding-top: .7rem;
+  border-top: 1px solid var(--line);
+  font-size: .8rem;
+  color: var(--ink-3);
+}
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: .8rem;
+  margin-bottom: 1.4rem;
+}
+
+.kpi {
+  padding: .85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.kpi__n {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.kpi__l { font-size: .8rem; color: var(--ink-3); letter-spacing: .03em; }
+
+
+/* =========================================================================
+   Strata — the rate history, and an audit entry's neighbours
+   -------------------------------------------------------------------------
+   A stack of versions where exactly one is in force. That one is edged; a
+   superseded one is dimmed; a scheduled one is dashed, because it is real but
+   has not happened yet. The old sheet drew the scheduled state as hatched
+   paper, which this identity has no gradients for — and a dashed rule says
+   "provisional" more plainly anyway.
+   ========================================================================= */
+
+.strata { list-style: none; margin: 0; padding: 0; }
+
+.strata__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: .4rem 1rem;
+  padding: .85rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+
+.strata__row:last-child { border-bottom: 0; }
+
+@media (min-width: 52rem) {
+  .strata__row { grid-template-columns: minmax(9rem, 1.1fr) auto auto minmax(0, 1.4fr); }
+}
+
+.strata__row--current { background: var(--accent-row); border-inline-start: 2px solid var(--accent); }
+.strata__row--superseded { color: var(--ink-3); }
+.strata__row--future { border-inline-start: 2px dashed var(--ink-3); background: var(--bg); }
+
+/* A scheduled rate is the one row in the stack that is *not* in force, so it
+   must not be the loudest thing in it. `.state--warn` fills elsewhere because
+   elsewhere it flags something the desk has to deal with; here it would put
+   more weight on the future than on the rate currently pricing every request
+   in the system. */
+.strata__row--future .state--warn {
+  background: transparent;
+  border-color: var(--ink-3);
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.strata__when { font-size: .84rem; color: var(--ink-3); }
+
+.strata__rate {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.strata__who { font-size: .83rem; color: var(--ink-3); }
+
+
+/* =========================================================================
+   Request detail
+   ========================================================================= */
+
+/* --- the track ----------------------------------------------------------
+   Horizontal on a wide screen, vertical on a phone. */
+
+.track {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 1.2rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.track__step {
+  position: relative;
+  padding-inline-start: 1.5rem;
+  padding-bottom: .9rem;
+  color: var(--ink-3);
+  font-size: .86rem;
+}
+
+.track__step:last-child { padding-bottom: 0; }
+
+.track__step::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: .27rem;
+  top: 1rem;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-2);
+}
+.track__step:last-child::before { display: none; }
+
+.track__dot {
+  position: absolute;
+  inset-inline-start: 0;
+  top: .42rem;
+  width: .6rem;
+  height: .6rem;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.track__label { display: block; line-height: 1.5; }
+.track__at { display: block; font-size: .72rem; color: var(--ink-3); }
+
+.track__step--done { color: var(--ink-2); }
+.track__step--done .track__dot { background: var(--accent); border-color: var(--accent); }
+.track__step--done::before { background: var(--accent-edge); }
+
+.track__step--current { color: var(--ink); font-weight: 700; }
+.track__step--current .track__dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.track__step--cancelled { opacity: .45; }
+.track__step--cancelled .track__dot { border-style: dashed; }
+
+.track__step--rejected { color: var(--danger); font-weight: 700; }
+.track__step--rejected .track__dot { background: var(--danger); border-color: var(--danger); }
+
+@media (min-width: 56rem) {
+  .track { flex-direction: row; }
+
+  .track__step { flex: 1; padding-inline-start: 0; padding-top: 1.4rem; padding-bottom: 0; }
+
+  .track__step::before {
+    inset-inline-start: .3rem;
+    inset-inline-end: 0;
+    top: .27rem;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+  }
+
+  .track__dot { top: 0; }
+  .track__step:last-child { flex: none; padding-inline-end: .6rem; }
+}
+
+/* --- the split ----------------------------------------------------------- */
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.2rem; align-items: start; }
+
+@media (min-width: 68rem) {
+  .split { grid-template-columns: minmax(0, 1fr) 21rem; }
+  .split__side { position: sticky; top: 1rem; }
+}
+
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; }
+
+.figure { border-inline-start: 2px solid var(--line-2); padding-inline-start: .9rem; }
+
+/* What the client actually transfers. The figure the whole request is about. */
+.figure--lead { border-inline-start-color: var(--accent); }
+
+.figure__l { font-size: .75rem; letter-spacing: .05em; color: var(--ink-3); }
+.figure__v { font-size: 1.35rem; font-weight: 700; line-height: 1.4; }
+.figure--lead .figure__v { color: var(--accent); }
+.figure__f { font-size: .78rem; color: var(--ink-3); }
+
+.meta-list { display: grid; gap: .5rem; margin: 0; }
+.meta-list div { display: flex; gap: .8rem; align-items: baseline; flex-wrap: wrap; }
+.meta-list dt { font-size: .82rem; color: var(--ink-3); min-width: 10.5rem; }
+.meta-list dd { margin: 0; font-weight: 600; }
+
+/* --- the daily cap ------------------------------------------------------- */
+
+.cap {
+  margin-top: 1.3rem;
+  padding: .8rem .9rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.cap--full { border-color: var(--danger); background: var(--danger-wash); }
+
+.cap__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: .82rem;
+  color: var(--ink-2);
+}
+
+.cap__track {
+  height: .4rem;
+  margin: .5rem 0 .45rem;
+  border-radius: 999px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+
+.cap__fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.cap--full .cap__fill { background: var(--danger); }
+.cap__foot { font-size: .78rem; color: var(--ink-3); }
+
+
+/* =========================================================================
+   Proofs
+   ========================================================================= */
+
+.proofs { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .8rem; }
+
+.proof {
+  display: block;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: inherit;
+  overflow: hidden;
+  text-decoration: none;
+}
+
+.proof:hover { border-color: var(--accent); text-decoration: none; color: inherit; }
+.proof:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.proof__thumb { display: block; width: 100%; height: 7rem; object-fit: cover; background: var(--bg); }
+
+.proof__glyph {
+  display: block;
+  height: 7rem;
+  line-height: 7rem;
+  text-align: center;
+  font-size: 1.6rem;
+  color: var(--ink-3);
+  background: var(--bg);
+}
+
+.proof__name { display: block; padding: .45rem .6rem 0; font-size: .82rem; font-weight: 600; word-break: break-all; }
+.proof__meta { display: block; padding: 0 .6rem .5rem; font-size: .74rem; color: var(--ink-3); }
+
+
+/* =========================================================================
+   The thread
+   -------------------------------------------------------------------------
+   Four speakers and one privileged kind of message. Finance sees all of it,
+   including the notes nobody outside this desk can read, so the distinction
+   that has to survive a tired glance is not *who spoke* but *who can read it*.
+   ========================================================================= */
+
+.thread { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+
+.note {
+  padding: .7rem .85rem;
+  border: 1px solid var(--line-2);
+  border-inline-start: 2px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.note--client { border-inline-start-color: var(--ink-3); }
+.note--merchant { border-inline-start-color: var(--ink-3); }
+.note--system { border-inline-start-color: var(--line-2); color: var(--ink-2); }
+
+/* This desk's own voice. */
+.note--finance_admin,
+.note--finance_staff { border-inline-start-color: var(--accent); background: var(--accent-wash); }
+
+/* An internal note must never be mistaken at a glance for something the
+   client can read. Sunk to the page ground and edged with a dashed rule: it
+   is off the record, and it reads that way without a second colour. The
+   `--internal` class is written after the role class in the markup, so this
+   wins over the Finance voice above. */
+.note--internal {
+  background: var(--bg);
+  border-style: dashed;
+  border-inline-start-color: var(--ink-2);
+}
+
+.note__head { display: flex; align-items: baseline; gap: .5rem; font-size: .77rem; color: var(--ink-3); }
+.note__who { font-weight: 700; color: var(--ink); }
+
+.note__tag {
+  padding: 0 .4rem;
+  border: 1px solid var(--ink-3);
+  border-radius: 4px;
+  color: var(--ink-2);
+  font-size: .66rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.note__at { margin-inline-start: auto; color: var(--ink-3); }
+
+.note__body {
+  margin: .35rem 0 0;
+  font-size: .9rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note__file {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  margin-top: .45rem;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.note__file:hover { text-decoration: underline; }
+
+
+/* =========================================================================
+   The composer
+   ========================================================================= */
+
+.composer { display: grid; gap: .6rem; margin-top: 1rem; }
+
+.composer__row { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem .9rem; }
+.composer__row .btn { margin-inline-start: auto; }
+
+.composer__file {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  min-width: 0;
+  font-size: .8rem;
+  color: var(--ink-3);
+}
+.composer__file input { font: inherit; font-size: .8rem; max-width: 100%; color: var(--ink-2); }
+
+.composer__check { display: flex; align-items: center; gap: .45rem; font-size: .84rem; color: var(--ink-2); }
+.composer__check input { accent-color: var(--accent); transform: scale(1.15); }
+
+.composer__hint { margin: 0; font-size: .78rem; color: var(--ink-3); }
+
+@media (max-width: 34rem) {
+  .composer__row { flex-direction: column; align-items: stretch; }
+  .composer__row .btn { margin-inline-start: 0; width: 100%; }
+}
+
+/* Spec §2's one unenforceable edge: masking is applied to fields, and free
+   text is not a field. This is the reminder, and it is deliberately not red —
+   it is a standing condition of the box, and a warning that cries wolf stops
+   being read. On a black panel, full-brightness text in a ruled box is loud
+   enough without spending a colour on it. */
+.composer__warn {
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  padding: .7rem .85rem;
+  border: 1px solid var(--line-2);
+  border-inline-start: 2px solid var(--ink-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: .84rem;
+  line-height: 1.65;
+}
+
+.composer__warn strong { color: var(--ink); }
+.composer__warn-mark { flex: none; font-size: 1rem; line-height: 1.5; color: var(--ink); }
+
+/* An internal note is not read by anyone outside the desk, so the reminder
+   does not apply to it. Stood down rather than removed: the checkbox can be
+   unticked again and the warning has to come back. The textarea takes the
+   same dashed, sunken treatment the note itself will have in the thread, so
+   the operator can see which of the two boxes they are typing into. */
+.composer:has(input[name$="is_internal_note"]:checked) .composer__warn { opacity: .4; }
+
+.composer:has(input[name$="is_internal_note"]:checked) .composer__field textarea {
+  border-style: dashed;
+  border-color: var(--ink-3);
+}
+
+
+/* =========================================================================
+   Actions
+   ========================================================================= */
+
+.act { display: grid; gap: .55rem; padding: .9rem 0; border-bottom: 1px solid var(--line); }
+.act:first-child { padding-top: 0; }
+.act:last-child { border-bottom: 0; padding-bottom: 0; }
+
+.act__why { margin: 0; font-size: .8rem; line-height: 1.6; color: var(--ink-3); }
+.act--danger .act__why { color: var(--danger); }
+
+.act .btn { justify-content: center; width: 100%; }
+
+
+/* =========================================================================
+   A one-time secret
+   -------------------------------------------------------------------------
+   Build-order step 15. The generated password, shown once and never again.
+
+   This is the one place in the panels that borrows the client portal's copy
+   button wholesale — full width, filled with the accent, taller than the
+   standard target — for exactly the reason the wallet number has one: the
+   failure it prevents is a human retyping twenty characters, and there is no
+   second chance to read this one.
+   ========================================================================= */
+
+.secret {
+  margin-bottom: 1.2rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--radius);
+  background: var(--accent-wash);
+  text-align: center;
+}
+
+.secret__label { margin: 0 0 .6rem; font-size: .82rem; color: var(--ink-2); }
+
+.secret__value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  line-height: 1.5;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  unicode-bidi: isolate;
+  word-break: break-all;
+  /* Long-press or double-click selects the whole string, which is the manual
+     fallback when the clipboard API is refused. */
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+/* Twenty characters at this size and tracking overflow a phone, and a password
+   that breaks across two lines is a password somebody transcribes wrong. */
+@media (max-width: 30rem) {
+  .secret__value { font-size: 1.15rem; letter-spacing: .05em; }
+}
+
+.secret__copy {
+  width: 100%;
+  max-width: 22rem;
+  min-height: 3rem;
+  margin: .9rem auto 0;
+  font-size: .95rem;
+}
+
+.secret__note {
+  margin: .9rem auto 0;
+  max-width: 34rem;
+  font-size: .8rem;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+/* The scratch node the copy fallback selects from. Off-screen rather than
+   hidden: a clipped element has no selectable text, and execCommand("copy")
+   has nothing to take. */
+.copy-buffer {
+  position: fixed;
+  top: 0;
+  inset-inline-start: -1000px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* A permission label repeated as a chip in a definition list wraps badly at
+   the sizes `.state` was drawn for. */
+.meta-list dd .state { margin: 0 0 .25rem; }
+
+/* The tri-state control on the permissions screen. It sits in a table cell
+   that is otherwise text, so it needs its own sizing rather than the form
+   grid's. */
+.ledger td select {
+  min-height: 2.4rem;
+  padding: .25rem .6rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: .85rem;
+}
+
+.ledger td select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* The login shell's own note paragraph (the password screen uses it). */
+.auth-note {
+  margin: 0 0 1.1rem;
+  font-size: .86rem;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+
+/* =========================================================================
+   The internal login (django-two-factor)
+   -------------------------------------------------------------------------
+   Lifted out of the template's own <style> block, which had to redeclare the
+   whole palette inline to reach it. A merchant and a finance operator both
+   land here, so it is the one screen that belongs to neither panel and has to
+   look like the product either way.
+   ========================================================================= */
+
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem 1rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 30rem;
+  padding: 1.8rem 1.6rem 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  animation: rise .45s cubic-bezier(.22, 1, .36, 1) backwards;
+}
+
+.auth-card__brand {
+  margin-bottom: 1.3rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.auth-card__mark { display: block; font-size: 1.4rem; font-weight: 700; color: var(--ink); }
+.auth-card__sub { font-size: .76rem; letter-spacing: .14em; color: var(--ink-3); }
+
+.auth-card form p { margin: 0 0 1rem; }
+
+/* django-two-factor renders its steps as Bootstrap markup we do not ship a
+   Bootstrap for: a `<table>` form, `.btn`/`.btn-primary`/`.btn-link` on the
+   controls, and grid classes that resolve to nothing. Rather than fight the
+   library, this section dresses what it actually emits.
+
+   The form comes out as `as_table`, which puts the label in a `<th>` beside
+   its input. In a 30rem card that is two cramped columns, so the cells are
+   unwound into blocks and the label sits above the field like every other
+   field in the product. */
+.auth-card table,
+.auth-card tbody,
+.auth-card tr,
+.auth-card th,
+.auth-card td { display: block; width: 100%; }
+
+.auth-card th { padding: 0 0 .3rem; text-align: start; }
+.auth-card td { padding: 0 0 1rem; }
+
+.auth-card label {
+  display: block;
+  margin-bottom: .3rem;
+  font-size: .84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.auth-card input[type="text"], .auth-card input[type="email"],
+.auth-card input[type="password"], .auth-card input[type="number"],
+.auth-card select {
+  width: 100%;
+  min-height: var(--tap);
+  padding: .55rem .75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+}
+
+.auth-card input:focus-visible, .auth-card select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* One-time codes read left-to-right even on an RTL page. */
+.auth-card input[name$="otp_token"], .auth-card input[name*="token"] {
+  direction: ltr;
+  text-align: start;
+  unicode-bidi: isolate;
+  letter-spacing: .35em;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- the step's controls -------------------------------------------------
+   Exactly one of them is the step's action, and only that one fills. The
+   library's own classes decide which: `btn-primary` is next/submit, `btn-link`
+   is the way out, and the bare `btn` is the wizard's back button. */
+
+.auth-card button, .auth-card .btn, .auth-card input[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  margin-top: 1rem;
+  margin-inline-start: .5rem;
+  padding: .5rem 1.15rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: .88rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.auth-card button:hover, .auth-card .btn:hover, .auth-card input[type="submit"]:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.auth-card button[type="submit"],
+.auth-card .btn-primary,
+.auth-card input[type="submit"]:not([hidden]) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.auth-card button[type="submit"]:hover,
+.auth-card .btn-primary:hover,
+.auth-card input[type="submit"]:not([hidden]):hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  filter: brightness(1.12);
+}
+
+/* Leaving is not an action worth a button's weight. */
+.auth-card .btn-link {
+  border-color: transparent;
+  color: var(--ink-3);
+  background: transparent;
+  font-weight: 600;
+}
+.auth-card .btn-link:hover { border-color: transparent; color: var(--accent); }
+
+/* The wizard disables "back" on the first step and the library leaves it in
+   the markup, so it has to read as unavailable rather than merely quiet. */
+.auth-card button[disabled], .auth-card .btn[disabled] {
+  opacity: .4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.auth-card input[type="submit"][hidden] { display: none; }
+
+.auth-card ul.errorlist { margin: .2rem 0 .6rem; }
+
+/* The enrolment QR is a black-on-white bitmap and has to stay that way to
+   scan, so it keeps a white plate of its own. */
+.auth-card img {
+  max-width: 100%;
+  height: auto;
+  padding: .5rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.auth-card code {
+  padding: .1rem .4rem;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--accent);
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}
+
+.auth-foot { margin: 0; font-size: .8rem; color: var(--ink-3); }
+
+
+/* =========================================================================
+   The two blanket overrides stay last, so every rule above is in their reach.
+   ========================================================================= */
+
+@media print {
+  .rail, .topbar__actions, .actions, .btn { display: none !important; }
+  body { background: #fff; color: #000; }
+  .panel { border-color: #999; background: #fff; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .btn--primary:hover, .btn--danger:hover, .auth-card button:hover { filter: none; }
+}

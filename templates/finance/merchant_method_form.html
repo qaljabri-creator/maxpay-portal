@@ -1,0 +1,29 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "إسناد طريقة دفع" %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:merchant_detail' merchant.pk %}">{{ merchant.name }}</a>{% endblock %}
+{% block heading %}{% trans "إسناد طريقة دفع" %}{% endblock %}
+
+{% block content %}
+<div class="panel" style="max-width:42rem">
+  <div class="panel__head">
+    <h2>{{ merchant.name }}</h2>
+    <p class="panel__note">{% trans "الطرق المُسندة سلفًا لا تظهر في القائمة." %}</p>
+  </div>
+  <div class="panel__body">
+    <div class="warn-note">
+      <strong>◷</strong>
+      <span>{% trans "الطريقة لا تُعرض على العملاء حتى تُضاف لها محفظة نشطة." %}</span>
+    </div>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "finance/_form_fields.html" %}
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">{% trans "إسناد" %}</button>
+        <a class="btn btn--ghost" href="{% url 'finance:merchant_detail' merchant.pk %}">{% trans "إلغاء" %}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

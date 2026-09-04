@@ -1,0 +1,34 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% if object %}{% trans "تعديل طريقة دفع" %}{% else %}{% trans "طريقة دفع جديدة" %}{% endif %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:payment_method_list' %}">{% trans "طرق الدفع" %}</a>{% endblock %}
+{% block heading %}{% if object %}{{ object.caption_ar }}{% else %}{% trans "طريقة دفع جديدة" %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel" style="max-width:48rem">
+  <div class="panel__head"><h2>{% trans "بيانات الطريقة" %}</h2></div>
+  <div class="panel__body">
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {% include "finance/_form_fields.html" with wide_fields="icon" %}
+      {% comment %}Said on both forms, because the mistake is symmetric: a QR
+      uploaded here would render at 1.9rem beside a caption and be unscannable,
+      and a logo uploaded as a wallet's QR would be presented to the client as
+      something to scan.{% endcomment %}
+      <div class="note">
+        <p><strong>{% trans "أيقونة الطريقة" %}</strong> —
+          {% trans "علامة صغيرة بجانب اسم الطريقة، للتعريف فقط. تُعرض بحجم أيقونة، فلا تصلح رمزًا يُمسح." %}
+        </p>
+        <p><strong>{% trans "رمز QR" %}</strong> —
+          {% trans "لا يُرفع هنا. مكانه محفظة التاجر داخل صفحة التاجر، لأن كل محفظة رمزها الخاص." %}
+        </p>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">{% trans "حفظ" %}</button>
+        <a class="btn btn--ghost" href="{% url 'finance:payment_method_list' %}">{% trans "إلغاء" %}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

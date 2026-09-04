@@ -1,0 +1,21 @@
+{% load static i18n %}<!DOCTYPE html>
+{% get_current_language_bidi as LANGUAGE_BIDI %}
+<html lang="{{ language|default:'ar' }}"
+      dir="{% if LANGUAGE_BIDI %}rtl{% else %}ltr{% endif %}"
+      data-theme="{{ theme|default:'light' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {# The portal is only ever reached inside the B2CORE frame. #}
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="same-origin">
+  <title>{% block title %}{% trans "بوابة MaxPay" %}{% endblock %}</title>
+  {# The shared foundation first, then this surface's own sheet. #}
+  <link rel="stylesheet" href="{% static 'css/system.css' %}">
+  <link rel="stylesheet" href="{% static 'css/embed.css' %}">
+  {% block extra_media %}{% endblock %}
+</head>
+<body class="embed">
+{% block body %}{% endblock %}
+</body>
+</html>

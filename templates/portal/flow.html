@@ -1,0 +1,413 @@
+{% load i18n %}
+{% comment %}
+The client request flow (spec §7) — build-order step 6.
+
+Six screens, one document. They cannot be six pages: the portal is framed
+cross-site, Django's CSRF cookie never arrives, and the per-session token that
+stands in for it can only travel in a header — which only `fetch` can set. See
+apps/portal/flow_views.py.
+
+Every screen is present in the DOM from the start and shown by `data-screen` on
+the shell, so moving between them costs no request and no reflow of the frame.
+The lists inside them are built by static/js/flow.js from the JSON endpoints;
+what is written here is the furniture, so the markup stays readable and the
+script stays free of layout.
+
+No inline script, no inline style, no inline handler — the CSP shipped with this
+page is `default-src 'self'` and each of those would need it relaxed.
+
+Step 10 added the withdrawal direction to the same six screens rather than a
+second set of them: screens 1 to 3 are identical, and screen 4 swaps the
+wallet-to-pay-into block and the proof upload for a destination account. Both
+halves are in the DOM here and the script shows whichever the `needs` object in
+the options payload says this direction uses — the server decides, so the form
+can never collect a field the submission would refuse.
+{% endcomment %}
+
+<div class="app" id="app" data-screen="type" hidden>
+
+  <header class="app__bar">
+    <button type="button" class="app__back" id="app-back" hidden>
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>{% trans "رجوع" %}</span>
+    </button>
+    <h1 class="app__title" id="app-title">{% trans "نوع الطلب" %}</h1>
+    <span class="app__step" id="app-step" hidden></span>
+  </header>
+
+  <div class="app__progress" id="app-progress" hidden>
+    <span class="app__progress-bar" id="app-progress-bar"></span>
+  </div>
+
+  <main class="app__body">
+
+    {# ---------------------------------------------------------------- 1 #}
+    <section class="screen" data-screen="type" aria-labelledby="app-title">
+      <p class="screen__lead">{% trans "ماذا تريد أن تفعل؟" %}</p>
+
+      <div class="choices" id="type-choices">
+        <button type="button" class="choice choice--hero" data-type="deposit">
+          <span class="choice__icon" aria-hidden="true">
+            <svg class="icon icon--lg" viewBox="0 0 24 24">
+              <path d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                    fill="none" stroke="currentColor" stroke-width="1.7"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="choice__body">
+            <span class="choice__title">{% trans "إيداع" %}</span>
+            <span class="choice__note">{% trans "أضِف رصيدًا إلى حسابك" %}</span>
+          </span>
+        </button>
+
+        <button type="button" class="choice choice--hero" data-type="withdrawal">
+          <span class="choice__icon" aria-hidden="true">
+            <svg class="icon icon--lg" viewBox="0 0 24 24">
+              <path d="M12 14V3m0 0L8 7m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                    fill="none" stroke="currentColor" stroke-width="1.7"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="choice__body">
+            <span class="choice__title">{% trans "سحب" %}</span>
+            <span class="choice__note">{% trans "اسحب رصيدًا من حسابك" %}</span>
+          </span>
+        </button>
+      </div>
+
+      {% comment %}Every choice screen carries one of these. A list that came
+      back empty is a fact the client is owed a reason for; a bordered box with
+      nothing in it is the screen saying "something went wrong" in a way nobody
+      can act on. The text is written from JS because the reason depends on the
+      direction and on what has been chosen so far.{% endcomment %}
+      <div class="empty" id="type-empty" hidden>
+        <p class="empty__text" id="type-empty-text"></p>
+      </div>
+
+      <section class="history" id="history" hidden>
+        <h2 class="history__title">{% trans "طلباتك الأخيرة" %}</h2>
+        <ul class="history__list" id="history-list"></ul>
+      </section>
+    </section>
+
+    {% comment %}The merchant comes before the method: the client settles who
+    they are handing money to first, and only then sees what that merchant
+    covers.{% endcomment %}
+    {# ---------------------------------------------------------------- 2 #}
+    <section class="screen" data-screen="merchant">
+      <p class="screen__lead" id="merchant-lead">{% trans "اختر التاجر الذي ستحوّل إليه." %}</p>
+      <div class="choices" id="merchant-choices"></div>
+      <div class="empty" id="merchant-empty" hidden>
+        <p class="empty__text" id="merchant-empty-text"></p>
+        <button type="button" class="empty__action" id="merchant-empty-back">
+          {% trans "ارجع واختر نوعًا آخر" %}
+        </button>
+      </div>
+    </section>
+
+    {# ---------------------------------------------------------------- 3 #}
+    <section class="screen" data-screen="method">
+      <p class="screen__lead" id="method-lead">{% trans "اختر الطريقة التي ستحوّل بها من طرق هذا التاجر." %}</p>
+      <div class="choices" id="method-choices"></div>
+      <div class="empty" id="method-empty" hidden>
+        <p class="empty__text" id="method-empty-text"></p>
+        <button type="button" class="empty__action" id="method-empty-back">
+          {% trans "اختر تاجرًا آخر" %}
+        </button>
+      </div>
+    </section>
+
+    {# ---------------------------------------------------------------- 4 #}
+    <section class="screen" data-screen="details">
+
+      <div class="chips" id="details-chips"></div>
+
+      {% comment %}Two ways to be told where to pay, and they are kept visibly
+      apart. A wallet may carry a number, a QR, or both — some rails (Super QI)
+      are settled by scanning a static code and have no account to type.
+
+      The QR is a separate block with a heading of its own, and it is the only
+      large picture on this screen. The other picture in the flow is a payment
+      method's icon on screen 3, rendered at 1.9rem beside its name; a code to
+      scan and a brand mark must not read as the same kind of thing, or a
+      client points a camera at a logo.{% endcomment %}
+      <div class="wallet" id="wallet-block">
+
+        <div class="wallet__account" id="wallet-account" hidden>
+          <p class="wallet__label" id="wallet-label">{% trans "حوّل المبلغ إلى هذه المحفظة" %}</p>
+          <p class="wallet__number" id="wallet-number" dir="ltr"></p>
+          <button type="button" class="button button--copy" id="wallet-copy"
+                  data-copy-target="wallet-number">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" fill="none"
+                    stroke="currentColor" stroke-width="1.7"/>
+              <path d="M5 15V6a2 2 0 012-2h9" fill="none" stroke="currentColor"
+                    stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+            <span class="button__label">{% trans "نسخ الرقم" %}</span>
+          </button>
+        </div>
+
+        <section class="wallet__qr" id="wallet-qr" hidden
+                 aria-labelledby="wallet-qr-title">
+          <h2 class="wallet__qr-title" id="wallet-qr-title">
+            {% trans "امسح رمز QR بتطبيق الدفع" %}
+          </h2>
+          <img class="wallet__qr-image" id="wallet-qr-image"
+               alt="{% trans 'رمز QR للدفع إلى هذا التاجر' %}">
+          <p class="wallet__qr-hint">
+            {% trans "رمز يُمسح بالكاميرا، وليس شعارًا." %}
+          </p>
+        </section>
+
+        <p class="wallet__owner" id="wallet-owner"></p>
+      </div>
+
+      <form class="form" id="request-form" novalidate>
+
+        {% comment %}Withdrawal only. First on the form on purpose: it is the
+        one field whose mistyping cannot be undone once a merchant has paid
+        against it (spec §6).{% endcomment %}
+        <div class="field" id="destination-field" hidden>
+          <label class="field__label" for="destination-input">
+            {% trans "رقم البطاقة أو المحفظة التي ستستلم المبلغ" %}
+          </label>
+          <div class="field__control">
+            <input type="text" inputmode="numeric" autocomplete="off"
+                   id="destination-input" name="destination_account"
+                   class="field__input" dir="ltr" placeholder="0000 0000 0000">
+          </div>
+          <p class="field__hint" id="destination-hint"></p>
+          <p class="field__review" id="destination-review" hidden dir="ltr"></p>
+          <p class="field__error" id="destination-error" hidden></p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="amount-input">
+            {% trans "المبلغ بالدولار" %}
+          </label>
+          <div class="field__control">
+            <input type="text" inputmode="decimal" autocomplete="off"
+                   id="amount-input" name="amount_usd" class="field__input"
+                   dir="ltr" placeholder="0.00">
+            <span class="field__suffix" aria-hidden="true">USD</span>
+          </div>
+          <p class="field__hint" id="amount-hint"></p>
+          <p class="field__error" id="amount-error" hidden></p>
+        </div>
+
+        <div class="quote" id="quote" aria-live="polite">
+          <div class="quote__row">
+            <span>{% trans "سعر الصرف" %}</span>
+            <span class="num" id="quote-rate" dir="ltr">···</span>
+          </div>
+          <div class="quote__row">
+            <span>{% trans "قيمة المبلغ" %}</span>
+            <span class="num" id="quote-converted" dir="ltr">···</span>
+          </div>
+          <div class="quote__row">
+            <span id="quote-commission-label">{% trans "العمولة" %}</span>
+            <span class="num" id="quote-commission" dir="ltr">···</span>
+          </div>
+          <div class="quote__row quote__row--total">
+            <span id="quote-total-label">{% trans "الإجمالي المطلوب تحويله" %}</span>
+            <span class="num" id="quote-total" dir="ltr">···</span>
+          </div>
+        </div>
+
+        <div class="field" id="proof-field">
+          <span class="field__label">{% trans "إثبات التحويل" %}</span>
+          <label class="dropzone" for="proof-input" id="proof-zone">
+            <svg class="icon icon--lg" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 16V6m0 0L8 10m4-4l4 4M5 18v1a2 2 0 002 2h10a2 2 0 002-2v-1"
+                    fill="none" stroke="currentColor" stroke-width="1.7"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="dropzone__text" id="proof-text">
+              {% trans "اضغط لاختيار صورة الإيصال أو ملف PDF" %}
+            </span>
+            <span class="dropzone__hint" id="proof-hint"></span>
+          </label>
+          <input type="file" id="proof-input" name="proof" class="sr-only"
+                 accept="image/jpeg,image/png,image/webp,application/pdf">
+
+          <div class="proof" id="proof-preview" hidden>
+            <img class="proof__thumb" id="proof-thumb" alt="" hidden>
+            <span class="proof__file" id="proof-name"></span>
+            <button type="button" class="button button--quiet" id="proof-clear">
+              {% trans "إزالة" %}
+            </button>
+          </div>
+          <p class="field__error" id="proof-error" hidden></p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="message-input">
+            {% trans "رسالة" %} <span class="field__optional">{% trans "اختيارية" %}</span>
+          </label>
+          <textarea id="message-input" name="message" class="field__input field__input--area"
+                    rows="3" placeholder="{% trans 'أي ملاحظة تريد أن تصل مع الطلب' %}"></textarea>
+          <p class="field__hint field__hint--count" id="message-count"></p>
+        </div>
+
+        <p class="alert alert--error" id="submit-error" hidden></p>
+
+        <button type="submit" class="button button--primary button--block" id="submit-button">
+          <span class="button__label">{% trans "إرسال الطلب" %}</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+    </section>
+
+    {# ------------------------------------------------------------ closed #}
+    {% comment %}Build-order step 11. Spec §7: outside business hours the
+    submission screens are replaced by this notice and a live countdown to
+    opening. It is a replacement, not an overlay: the wizard screens are
+    unreachable while it is up, and the server refuses a submission
+    independently, so a client who gets past the screen still gets nowhere.
+
+    The request history is repeated here on purpose. It lives on screen 1,
+    which is one of the screens being replaced, and a client who cannot file
+    anything tonight is exactly the client who wants to check on what they
+    filed this morning.{% endcomment %}
+    <section class="screen screen--centred" data-screen="closed">
+      <div class="seal seal--quiet" aria-hidden="true">
+        <svg class="icon icon--xl" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h2 class="seal__title">{% trans "خارج أوقات العمل" %}</h2>
+      <p class="seal__lead" id="closed-message"></p>
+
+      <div class="countdown" id="countdown" hidden>
+        <p class="countdown__label">{% trans "يفتح بعد" %}</p>
+        <p class="countdown__value num" id="countdown-value" dir="ltr" role="timer">···</p>
+        <p class="countdown__at" id="countdown-at"></p>
+      </div>
+
+      <dl class="summary" id="closed-hours"></dl>
+
+      <section class="history" id="closed-history" hidden>
+        <h2 class="history__title">{% trans "طلباتك الأخيرة" %}</h2>
+        <ul class="history__list" id="closed-history-list"></ul>
+      </section>
+    </section>
+
+    {# ---------------------------------------------------------------- 5 #}
+    <section class="screen screen--centred" data-screen="confirm">
+      <div class="seal" aria-hidden="true">
+        <svg class="icon icon--xl" viewBox="0 0 24 24">
+          <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor"
+                stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h2 class="seal__title">{% trans "تم إرسال طلبك" %}</h2>
+      <p class="seal__lead">
+        {% trans "احتفظ بهذا المرجع. هو ما تُتابَع به حالة الطلب." %}
+      </p>
+
+      <p class="reference" id="confirm-reference" dir="ltr"></p>
+      <button type="button" class="button button--copy" id="confirm-copy"
+              data-copy-target="confirm-reference">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" fill="none"
+                stroke="currentColor" stroke-width="1.7"/>
+          <path d="M5 15V6a2 2 0 012-2h9" fill="none" stroke="currentColor"
+                stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span class="button__label">{% trans "نسخ المرجع" %}</span>
+      </button>
+
+      <dl class="summary" id="confirm-summary"></dl>
+
+      <div class="actions">
+        <button type="button" class="button button--primary button--block" id="confirm-track">
+          {% trans "متابعة الطلب" %}
+        </button>
+        <button type="button" class="button button--block" id="confirm-new">
+          {% trans "طلب جديد" %}
+        </button>
+      </div>
+    </section>
+
+    {# ---------------------------------------------------------------- 6 #}
+    <section class="screen" data-screen="request">
+      <div class="request__head">
+        <p class="reference reference--sm" id="request-reference" dir="ltr"></p>
+        <span class="pill" id="request-status"></span>
+      </div>
+
+      <p class="alert alert--error" id="request-rejection" hidden></p>
+
+      <dl class="summary" id="request-summary"></dl>
+
+      <h2 class="section__title">{% trans "مسار الطلب" %}</h2>
+      <ol class="timeline" id="request-timeline"></ol>
+
+      <h2 class="section__title">{% trans "المرفقات" %}</h2>
+      <ul class="files" id="request-files"></ul>
+      <p class="empty" id="request-files-empty" hidden>{% trans "لا توجد مرفقات." %}</p>
+
+      <h2 class="section__title">{% trans "المحادثة" %}</h2>
+      <ul class="thread" id="request-thread"></ul>
+      <p class="empty" id="request-thread-empty" hidden>
+        {% trans "لا توجد رسائل بعد. اكتب هنا وسيصلك الرد." %}
+      </p>
+
+      {% comment %}Spec §9: two-way, and open whatever state the request is
+      in. A question after a request closed is still a question.{% endcomment %}
+      <form class="composer" id="composer" novalidate>
+        <label class="sr-only" for="composer-input">{% trans "رسالة" %}</label>
+        <textarea id="composer-input" class="composer__input" rows="1"
+                  dir="auto" placeholder="{% trans 'اكتب رسالتك…' %}"></textarea>
+
+        <div class="composer__row">
+          <button type="button" class="composer__attach" id="composer-attach"
+                  aria-label="{% trans 'إرفاق ملف' %}">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 8l-6.5 6.5a2.5 2.5 0 003.5 3.5L21 11a4.5 4.5 0 00-6.4-6.4L7 12"
+                    fill="none" stroke="currentColor" stroke-width="1.7"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <input type="file" id="composer-file" class="sr-only"
+                 accept="image/jpeg,image/png,image/webp,application/pdf">
+
+          <span class="composer__file" id="composer-file-row" hidden>
+            <span class="composer__file-name" id="composer-file-name"></span>
+            <button type="button" class="button button--quiet" id="composer-file-clear">
+              {% trans "إزالة" %}
+            </button>
+          </span>
+
+          <button type="submit" class="button button--primary composer__send" id="composer-send">
+            <span class="button__label">{% trans "إرسال" %}</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <p class="composer__hint" id="composer-count"></p>
+        <p class="alert alert--error" id="composer-error" hidden></p>
+      </form>
+
+      <div class="actions">
+        <button type="button" class="button button--block" id="request-refresh">
+          {% trans "تحديث" %}
+        </button>
+        <button type="button" class="button button--block" id="request-new">
+          {% trans "طلب جديد" %}
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+</div>
+
+{{ flow_config|json_script:"maxpay-flow-config" }}

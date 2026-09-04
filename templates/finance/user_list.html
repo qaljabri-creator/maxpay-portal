@@ -1,0 +1,121 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "المستخدمون والأدوار" %}{% endblock %}
+{% block crumb %}{% trans "الضبط والرقابة" %}{% endblock %}
+{% block heading %}{% trans "المستخدمون والأدوار" %}{% endblock %}
+
+{% block actions %}
+  {% if can_manage_users %}
+    <a class="btn btn--primary" href="{% url 'finance:user_create' %}">{% trans "حساب جديد" %}</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="kpi-row">
+  {% for role, count in role_counts.items %}
+    <div class="kpi">
+      <div class="kpi__n">{{ count }}</div>
+      <div class="kpi__l">
+        {% if role == 'finance_admin' %}{% trans "مدير مالي نشط" %}
+        {% elif role == 'finance_staff' %}{% trans "موظف مالي نشط" %}
+        {% else %}{% trans "تاجر نشط" %}{% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="panel">
+  <form class="toolbar" method="get">
+    {{ filter_form.q }}
+    {{ filter_form.role }}
+    {{ filter_form.status }}
+    <button class="btn btn--sm" type="submit">{% trans "تصفية" %}</button>
+    {% if has_filters %}
+      <a class="btn btn--sm btn--ghost" href="{% url 'finance:user_list' %}">{% trans "إلغاء التصفية" %}</a>
+    {% endif %}
+    <span class="spacer"></span>
+    <span class="helptext">
+      {% trans "لا تُحذف الحسابات أبدًا؛ تُعطَّل حتى تبقى قيود التدقيق مرتبطة بها." %}
+    </span>
+  </form>
+
+  <div class="panel__body panel__body--flush">
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>{% trans "الاسم" %}</th>
+            <th>{% trans "البريد" %}</th>
+            <th>{% trans "الدور" %}</th>
+            <th>{% trans "سجل التاجر" %}</th>
+            <th>{% trans "المصادقة الثنائية" %}</th>
+            <th>{% trans "الحالة" %}</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account in users %}
+            <tr class="{% if not account.is_active %}is-muted{% endif %}"
+                style="animation-delay:{{ forloop.counter0 }}0ms">
+              <td class="primary-cell">
+                <a href="{% url 'finance:user_detail' account.pk %}">{{ account.full_name }}</a>
+                {% if account.is_superuser %}<span class="stamp">{% trans "مستخدم أعلى" %}</span>{% endif %}
+              </td>
+              <td class="num" data-label="{% trans "البريد" %}">{{ account.email }}</td>
+              <td data-label="{% trans "الدور" %}">{{ account.get_role_display }}</td>
+              <td data-label="{% trans "سجل التاجر" %}">
+                {% if account.merchant_profile %}
+                  <a href="{% url 'finance:merchant_detail' account.merchant_profile.pk %}">{{ account.merchant_profile.name }}</a>
+                {% elif account.role == 'merchant' %}
+                  <span class="state state--warn">{% trans "بلا سجل" %}</span>
+                {% else %}
+                  <span class="helptext">···</span>
+                {% endif %}
+              </td>
+              <td data-label="{% trans "المصادقة الثنائية" %}">
+                {% if account.has_verified_two_factor %}
+                  <span class="state state--on">{% trans "مفعّلة" %}</span>
+                {% else %}
+                  <span class="state state--off">{% trans "لم تُسجَّل" %}</span>
+                {% endif %}
+              </td>
+              <td data-label="{% trans "الحالة" %}">
+                {% if account.is_active %}
+                  <span class="state state--on">{% trans "نشط" %}</span>
+                {% else %}
+                  <span class="state state--off">{% trans "معطّل" %}</span>
+                {% endif %}
+                {% if account.must_change_password %}
+                  <span class="state state--off">{% trans "كلمة مرور مؤقتة" %}</span>
+                {% endif %}
+              </td>
+              <td class="actions">
+                <a class="btn btn--sm btn--ghost" href="{% url 'finance:user_detail' account.pk %}">{% trans "تفاصيل" %}</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7">
+                <div class="empty">{% trans "لا يوجد مستخدم مطابق." %}</div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if is_paginated %}
+  <div class="pager">
+    {% if page_obj.has_previous %}
+      <a class="btn btn--sm" href="?page={{ page_obj.previous_page_number }}">{% trans "السابق" %}</a>
+    {% endif %}
+    <span class="helptext num">{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a class="btn btn--sm" href="?page={{ page_obj.next_page_number }}">{% trans "التالي" %}</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

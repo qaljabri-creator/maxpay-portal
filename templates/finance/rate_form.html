@@ -1,0 +1,43 @@
+{% extends "finance/base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% trans "ضبط سعر صرف" %}{% endblock %}
+{% block crumb %}<a href="{% url 'finance:rate_list' %}">{% trans "أسعار الصرف" %}</a>{% endblock %}
+{% block heading %}{% trans "ضبط سعر جديد" %}{% endblock %}
+
+{% block content %}
+<div class="panel" style="max-width:46rem">
+  <div class="panel__head">
+    <h2>{% trans "سعر جديد" %}</h2>
+    <p class="panel__note">{% trans "لا يُعدَّل سعر قائم أبدًا؛ يُضاف سطر جديد ويبقى القديم في السجل." %}</p>
+  </div>
+  <div class="panel__body">
+    <div class="warn-note">
+      <strong>◷</strong>
+      <span>
+        {% trans "السعر الجديد يُطبَّق على الطلبات الجديدة فقط. كل طلب قائم يحتفظ بالسعر والعمولة كما كانا وقت تقديمه." %}
+      </span>
+    </div>
+
+    <dl class="meta-list" style="margin-bottom:1.3rem">
+      <div>
+        <dt>{% trans "سعر الإيداع الحالي" %}</dt>
+        <dd class="num">{% if deposit_rate %}{{ deposit_rate.iqd_per_usd|floatformat:"-2u" }}{% else %}···{% endif %}</dd>
+      </div>
+      <div>
+        <dt>{% trans "سعر السحب الحالي" %}</dt>
+        <dd class="num">{% if withdrawal_rate %}{{ withdrawal_rate.iqd_per_usd|floatformat:"-2u" }}{% else %}···{% endif %}</dd>
+      </div>
+    </dl>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "finance/_form_fields.html" with wide_fields="note" %}
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">{% trans "تسجيل السعر" %}</button>
+        <a class="btn btn--ghost" href="{% url 'finance:rate_list' %}">{% trans "إلغاء" %}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,108 @@
+/* =========================================================================
+   MaxPay — the shared foundation
+   -------------------------------------------------------------------------
+   Three surfaces, one identity. This file is the part of it that must not be
+   allowed to differ between them:
+
+     black ground, one accent (#19FFFD), Cairo, dark only, Arabic RTL.
+
+   It carries the palette, the typeface, and the two reset rules every surface
+   states identically. Nothing else. It has no components in it, because a
+   component belongs to the surface that uses it, and a file that grows
+   components is a file every surface has to load in full.
+
+   It is loaded *before* the surface sheet on every page:
+
+     templates/base.html          system.css + portal.css   (Finance, 403, 2FA)
+     templates/merchant/base.html system.css + merchant.css
+     templates/portal/base.html   system.css + embed.css + flow.css
+
+   Two link tags rather than an `@import`: links are discovered together and
+   fetched in parallel, an import is discovered only after the importing sheet
+   has arrived and serialises the two.
+
+   **Metrics deliberately stay out of here.** `--radius`, `--tap` and
+   `--rail-w` are surface decisions, not identity ones: the client portal is a
+   phone surface framed inside someone else's page and wants a 48px target and
+   a softer corner; the panels are desk tools that fit more on a screen. Each
+   sheet declares its own, and the split is the point — what is shared is
+   shared, and what is a judgement call is made where it is judged.
+
+   Self-contained: the webfont is served from this origin, because every
+   surface ships `default-src 'self'` (spec §11). No CDN, no third-party
+   request.
+   ========================================================================= */
+
+/* --- Cairo, self-hosted (SIL Open Font License 1.1) ----------------------
+   Two subsets, one variable face each. Arabic carries almost every glyph in
+   the product; the Latin cut is only ever pulled in by a reference, a wallet
+   number or a currency code. See static/fonts/README.md. */
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../fonts/cairo-arabic.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+                 U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F,
+                 U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../fonts/cairo-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+                 U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF,
+                 U+FFFD;
+}
+
+:root {
+  /* Ground, and the two surfaces that sit on it. The steps are small on
+     purpose: on a black screen a 6% lift already reads as a raised card, and
+     anything louder turns into grey furniture. */
+  --bg:        #000000;
+  --surface:   #0a0c0c;
+  --surface-2: #101414;
+
+  --line:   #1c2221;
+  --line-2: #2b3332;
+
+  --ink:   #f4f7f6;
+  --ink-2: #a2adab;
+  --ink-3: #6e7a78;
+
+  /* The locked accent. Nothing else in the product carries a hue.
+
+     Each surface spends it on the same three jobs and says so in its own
+     header: a *fill* for the one action to take, an *edge* for what is in
+     force or where you are, and *text* for a value that has to be read. A
+     screen where more than one thing glows is a screen where nothing does. */
+  --accent: #19fffd;
+  /* What sits on top of the accent when it is used as a fill. Near-black
+     rather than pure, so a large accent block does not vibrate. */
+  --accent-ink:  #001a1a;
+  --accent-wash: rgba(25, 255, 253, .09);
+  --accent-edge: rgba(25, 255, 253, .34);
+  /* A whole table row is a lot of area for a tint, so it gets a weaker one
+     than a chip does and leans on its edge marker instead. */
+  --accent-row:  rgba(25, 255, 253, .05);
+
+  /* Reserved strictly for errors, rejection and a failed login. An error that
+     reads as body text is not an error, and the accent cannot say "this went
+     wrong" while it is also saying "press this". */
+  --danger:      #ff5b57;
+  --danger-wash: rgba(255, 91, 87, .11);
+
+  --font: "Cairo", "Noto Kufi Arabic", "Segoe UI", system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  background: var(--bg);
+}

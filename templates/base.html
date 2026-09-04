@@ -1,0 +1,41 @@
+{% load static i18n %}<!DOCTYPE html>
+{% get_current_language_bidi as LANGUAGE_BIDI %}
+<html lang="{{ LANGUAGE_CODE|default:'ar' }}" dir="{% if LANGUAGE_BIDI %}rtl{% else %}ltr{% endif %}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}{% trans "بوابة MaxPay" %}{% endblock %}</title>
+  {% comment %}Two sheets on every internal page: the shared foundation, then
+  the one this surface owns. system.css carries the palette, the typeface and
+  the reset that all three surfaces must not be allowed to differ on; the
+  second sheet carries the components, which are nobody else's business.
+
+  The second is a block because the two panels no longer share one: Finance
+  keeps the default below, and the merchant shell swaps in its own. Anything
+  that does not override it — Finance, the two-factor pages, the error pages —
+  renders exactly as it did before.{% endcomment %}
+  <link rel="stylesheet" href="{% static 'css/system.css' %}">
+  {% block stylesheet %}<link rel="stylesheet" href="{% static 'css/portal.css' %}">{% endblock %}
+  {% block extra_media %}{% endblock %}
+</head>
+<body>
+{% block body %}{% endblock %}
+
+{% comment %}The ten-second poll (spec §8, §10), build-order step 13. Only the
+two internal panels set `poll`, so the client portal and the login pages ship
+nothing. The config travels as a JSON island rather than inline script: the
+panels' CSP is `script-src 'self'` (spec §11).
+
+A `{% comment %}` tag and not `{# #}`: Django's short comment is single-line
+only, so a multi-line one is not lexed as a comment at all and every word of
+it renders into the page as visible text.{% endcomment %}
+{% if poll %}
+  {{ poll|json_script:"maxpay-poll-config" }}
+  <script src="{% static 'js/panel.js' %}" defer></script>
+  {% comment %}A confirmation step for the two controls a stray click cannot be
+  undone from: archiving a merchant, and removing a wallet.{% endcomment %}
+  <script src="{% static 'js/confirm.js' %}" defer></script>
+{% endif %}
+</body>
+</html>
