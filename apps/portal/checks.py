@@ -13,6 +13,20 @@ They fall into two groups, and the split matters:
   a real deployment. A developer building the Finance panel has no reason to
   hold B2CORE credentials, and refusing to start without them would just teach
   everyone to silence checks.
+
+A check is also a thing that can be wrong, and two of these were. ``W005`` and
+``W006`` warned that the issuer and audience were unverified and told the
+operator to set both "once B2CORE confirms the value". When a real token was
+finally examined (4 Sep 2026) it turned out to carry no ``aud`` at all, so the
+second hint was an instruction to break the product: an operator clearing
+warnings before go-live would have refused every client. They are now
+``E005`` and ``E006``, the audience one fires on the opposite condition, and
+both are errors because either state stops clients signing in or lets the wrong
+signer in.
+
+The renumbering is deliberate rather than tidy. ``W006`` meant "you have not set
+the audience"; ``E006`` means "you have set it and must not". Anything that had
+silenced the old id would otherwise have silenced its opposite.
 """
 
 from urllib.parse import urlsplit
@@ -139,22 +153,49 @@ def check_b2core_deployment(app_configs, **kwargs):
             )
         )
 
-    if not getattr(settings, "B2CORE_JWT_ISSUER", ""):
+    # An Error, not a Warning, and not the same shape it used to be. Both of
+    # these were warnings that read as "you have not finished configuring
+    # this yet"; one of them turned out to be advice that breaks the product.
+    issuer = str(getattr(settings, "B2CORE_JWT_ISSUER", "") or "")
+    origin = str(getattr(settings, "B2CORE_ORIGIN", "") or "")
+    if not issuer:
         issues.append(
-            Warning(
+            Error(
                 "B2CORE_JWT_ISSUER is unset, so the 'iss' claim is not verified.",
-                hint="Any correctly-signed token is accepted regardless of who issued "
-                "it. Set it once B2CORE confirms the issuer value.",
-                id="portal.W005",
+                hint="Any correctly-signed token is accepted regardless of who "
+                "issued it — including one signed by another key in the same "
+                "JWKS. Set it to the literal issuer B2CORE mints, trailing "
+                "slash included; base.py carries the value.",
+                id="portal.E005",
             )
         )
-    if not getattr(settings, "B2CORE_JWT_AUDIENCE", ""):
+    elif origin and issuer.rstrip("/") == origin.rstrip("/"):
         issues.append(
-            Warning(
-                "B2CORE_JWT_AUDIENCE is unset, so the 'aud' claim is not verified.",
-                hint="A token B2CORE minted for a different relying party would be "
-                "accepted here. Set it once B2CORE confirms the audience value.",
-                id="portal.W006",
+            Error(
+                f"B2CORE_JWT_ISSUER is the portal origin ({origin}).",
+                hint="The issuer is B2CORE's auth service, not the site it "
+                "frames. They look like they should be the same string and are "
+                "not: the issuer is on api.* with a path. No client could "
+                "authenticate against this.",
+                id="portal.E005",
+            )
+        )
+
+    # This one is inverted from what it was, and the inversion is the point.
+    # It used to warn when the audience was *unset* and tell the operator to
+    # "set it once B2CORE confirms the audience value". B2CORE has now been
+    # observed: it mints no `aud` at all. The old hint was an instruction to
+    # break the integration, and tidying the warning away would have taken the
+    # portal down for every client.
+    if getattr(settings, "B2CORE_JWT_AUDIENCE", ""):
+        issues.append(
+            Error(
+                "B2CORE_JWT_AUDIENCE is set, and B2CORE sends no 'aud' claim.",
+                hint="Setting it turns on PyJWT's audience check, which then "
+                "refuses every real token for a claim that is never minted — no "
+                "client can sign in. Leave it empty. The issuer check is what "
+                "establishes who signed the token.",
+                id="portal.E006",
             )
         )
 

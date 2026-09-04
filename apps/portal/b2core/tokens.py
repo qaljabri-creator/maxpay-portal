@@ -20,10 +20,32 @@ logger = logging.getLogger("maxpay.b2core")
 
 #: Asymmetric only. Listing algorithms explicitly is what stops an attacker
 #: swapping in ``alg: none`` or an HMAC signed with the public key.
-DEFAULT_ALGORITHMS = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"]
+#:
+#: ``EdDSA`` is what B2CORE actually signs with — confirmed against a real token
+#: on 4 Sep 2026, not from their documentation. It is asymmetric like the rest
+#: of this list, so admitting it loosens nothing: the private key still never
+#: leaves B2CORE, and the JWKS still publishes only the public half. PyJWT
+#: registers it and reads the ``OKP``/``Ed25519`` JWK that carries it, both via
+#: ``cryptography``, which is already a pinned dependency.
+#:
+#: The RSA and EC entries stay. They cost nothing, and a rotation to one of them
+#: should not be an outage.
+DEFAULT_ALGORITHMS = [
+    "EdDSA",
+    "RS256", "RS384", "RS512",
+    "ES256", "ES384", "ES512",
+]
 
-#: Claims we will look at, in order, when filling in a display name.
-NAME_CLAIMS = ("name", "full_name", "given_name", "preferred_username")
+#: A claim carrying the whole name, in preference order. B2CORE sends none of
+#: these — the composition below is what actually runs — but a token that does
+#: carry one has said the name better than we could assemble it.
+FULL_NAME_CLAIMS = ("name", "full_name", "preferred_username")
+
+#: The two halves, each with the OIDC spelling beside B2CORE's. B2CORE sends
+#: ``first_name``/``last_name``; ``given_name``/``family_name`` are what the
+#: standard calls the same things, and cost one tuple entry each to accept.
+GIVEN_NAME_CLAIMS = ("first_name", "given_name")
+FAMILY_NAME_CLAIMS = ("last_name", "family_name")
 
 
 @dataclass(frozen=True)
@@ -53,6 +75,30 @@ def _first_claim(claims: dict, names: tuple[str, ...]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _display_name(claims: dict) -> str:
+    """The client's name, however this token chose to say it.
+
+    B2CORE sends ``first_name`` and ``last_name`` and no combined claim, so the
+    name has to be assembled. Before this was written the lookup asked only for
+    single-claim spellings, found none of them, and returned an empty string —
+    which no test caught because nothing was *wrong*, only blank. Finance saw
+    «···» where the client's name should be.
+
+    A combined claim still wins when one is present: a name is not always
+    "given then family", and a service that sends the whole thing has already
+    made that decision in the right place. Only when there is no such claim are
+    the halves joined, and either half alone is better than nothing.
+    """
+    whole = _first_claim(claims, FULL_NAME_CLAIMS)
+    if whole:
+        return whole
+    parts = [
+        _first_claim(claims, GIVEN_NAME_CLAIMS),
+        _first_claim(claims, FAMILY_NAME_CLAIMS),
+    ]
+    return " ".join(part for part in parts if part)
 
 
 def verify_token(token: str) -> Identity:
@@ -123,6 +169,16 @@ def verify_token(token: str) -> Identity:
     if not isinstance(subject, str) or not subject.strip():
         raise B2CoreTokenError("Token has no usable subject claim.")
 
+    # B2CORE's token carries no account number and no client type — checked
+    # against a real one on 4 Sep 2026. The setting stays because the claim may
+    # appear later and this is where it would be read, but it resolves to
+    # nothing today and `Client.account_number` is blank for every client
+    # authenticated since.
+    #
+    # It is deliberately *not* pointed at `sub` or `sid` to fill the column.
+    # Both are real identifiers and neither is an account number; writing one
+    # into a field Finance reads as "account number" would be worse than the
+    # blank, because a blank is obviously absent and a wrong number is not.
     account_claim = getattr(settings, "B2CORE_ACCOUNT_CLAIM", "account_number")
     account_number = claims.get(account_claim)
 
@@ -135,7 +191,7 @@ def verify_token(token: str) -> Identity:
     return Identity(
         subject=subject.strip(),
         email=(claims.get("email") or "").strip() if isinstance(claims.get("email"), str) else "",
-        display_name=_first_claim(claims, NAME_CLAIMS),
+        display_name=_display_name(claims),
         account_number=str(account_number).strip() if account_number else "",
         language=language,
         expires_at=claims.get("exp"),

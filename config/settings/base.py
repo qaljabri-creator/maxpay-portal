@@ -328,20 +328,50 @@ B2CORE_ORIGIN = env_str("B2CORE_ORIGIN", default="").rstrip("/")
 #: Spec §4: `https://api.<domain>/.well-known/jwks.json`.
 B2CORE_JWKS_URL = env_str("B2CORE_JWKS_URL", default="")
 
-#: Verified when set. Leaving either blank accepts a correctly-signed token
-#: regardless of who issued it or who it was meant for — see the system check
-#: in apps/portal/checks.py, which says so out loud.
-B2CORE_JWT_ISSUER = env_str("B2CORE_JWT_ISSUER", default="")
+#: The `iss` B2CORE actually mints, character for character — read off a real
+#: token on 4 Sep 2026, not from documentation.
+#:
+#: **The trailing slash is part of the value.** PyJWT compares `iss` by string
+#: equality, so dropping it rejects every client, and so does using the portal
+#: origin here: the issuer is on `api.` with a path, the origin is the portal
+#: host with none. `portal.E005` refuses a deployment that makes either mistake,
+#: and prod.py refuses to boot at all.
+B2CORE_JWT_ISSUER = env_str(
+    "B2CORE_JWT_ISSUER",
+    default="https://api.maxifyfx.com/srvsz/auth/clients/v1/",
+)
+
+#: **Must stay empty. B2CORE sends no `aud` claim at all.**
+#:
+#: Not an oversight to be corrected once somebody finds the right value — there
+#: is no value. Setting this turns on PyJWT's audience check, which then refuses
+#: every real token for a claim B2CORE never mints, and the portal stops
+#: authenticating anybody. `portal.E006` fires if it is set, which is the
+#: opposite of what the check here used to say.
+#:
+#: An empty audience is not a hole the way an empty issuer is: the issuer is
+#: what stops us trusting a token signed by a key in someone else's JWKS, and
+#: that is the check doing the work.
 B2CORE_JWT_AUDIENCE = env_str("B2CORE_JWT_AUDIENCE", default="")
 
 #: Asymmetric only. An HMAC entry here would let anyone holding the *public*
 #: key mint tokens we accept, and "none" needs no key at all.
+#:
+#: `EdDSA` leads because it is what B2CORE signs with. The others stay so a
+#: rotation to an RSA or EC key is not an outage.
 B2CORE_JWT_ALGORITHMS = env_list(
     "B2CORE_JWT_ALGORITHMS",
-    default=["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+    default=["EdDSA", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
 )
 
 B2CORE_JWT_LEEWAY_SECONDS = env_int("B2CORE_JWT_LEEWAY_SECONDS", default=30)
+#: Which claim would carry the client's B2CORE account number, if one did.
+#: **None does.** B2CORE's token has `sub`, `email`, `first_name`, `last_name`,
+#: `aal`, `amr`, `sid`, `jti` and the timestamps — no account number and no
+#: client type. This stays for the day one appears; until then it resolves to
+#: nothing and Finance identifies a client by email. Never point it at `sub` or
+#: `sid` to fill the column: both are real identifiers and neither is an
+#: account number.
 B2CORE_ACCOUNT_CLAIM = env_str("B2CORE_ACCOUNT_CLAIM", default="account_number")
 B2CORE_MAX_TOKEN_BYTES = env_int("B2CORE_MAX_TOKEN_BYTES", default=8192)
 B2CORE_JWKS_CACHE_SECONDS = env_int("B2CORE_JWKS_CACHE_SECONDS", default=600)

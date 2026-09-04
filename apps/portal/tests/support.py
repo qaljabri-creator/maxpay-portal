@@ -15,8 +15,8 @@ from functools import lru_cache
 from unittest import mock
 
 import jwt
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from jwt.algorithms import ECAlgorithm, RSAAlgorithm
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+from jwt.algorithms import ECAlgorithm, OKPAlgorithm, RSAAlgorithm
 from jwt.jwks_client import PyJWKClient
 from jwt.utils import base64url_encode
 
@@ -47,8 +47,12 @@ class KeyPair:
         self.algorithm = algorithm
 
     def jwk(self, **overrides) -> dict:
-        serializer = ECAlgorithm if self.algorithm.startswith("ES") else RSAAlgorithm
-        data = serializer.to_jwk(self.private_key.public_key(), as_dict=True)
+        if self.algorithm == "EdDSA":
+            # OKPAlgorithm has no as_dict, so this one comes back as JSON.
+            data = json.loads(OKPAlgorithm.to_jwk(self.private_key.public_key()))
+        else:
+            serializer = ECAlgorithm if self.algorithm.startswith("ES") else RSAAlgorithm
+            data = serializer.to_jwk(self.private_key.public_key(), as_dict=True)
         data.update({"kid": self.kid, "use": "sig", "alg": self.algorithm})
         data.update(overrides)
         return data
@@ -72,6 +76,8 @@ def _keys() -> dict[str, KeyPair]:
         # Never published. Anything signed with it is, by construction, forged.
         "attacker": KeyPair("b2core-key-1", rsa.generate_private_key(public_exponent=65537, key_size=2048), "RS256"),
         "ec": KeyPair("b2core-ec-1", ec.generate_private_key(ec.SECP256R1()), "ES256"),
+        # What B2CORE actually signs with — see B2CoreShapedTokenTests.
+        "ed25519": KeyPair("b2core-ed25519-1", ed25519.Ed25519PrivateKey.generate(), "EdDSA"),
     }
 
 
@@ -192,3 +198,73 @@ class StubbedJWKS:
 
 def decode_body(response) -> dict:
     return json.loads(response.content.decode("utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# The real B2CORE, as observed
+# ---------------------------------------------------------------------------
+#
+# Everything above this line predates ever seeing a token B2CORE actually
+# minted. It models a service that signs RS256, sends an `aud`, gives a
+# combined `name` and carries an account number — and every one of those is
+# wrong. The fixtures stay, because they exercise the verification path against
+# algorithms and shapes we still accept, and because a rotation to an RSA key
+# should not be an outage.
+#
+# What follows is the real thing, read off a live token on 4 Sep 2026. Tests
+# that care whether a *client* can sign in use these.
+
+#: The issuer B2CORE mints, character for character. The trailing slash is part
+#: of it, and it is on `api.` with a path — not the portal origin.
+REAL_ISSUER = "https://api.maxifyfx.test/srvsz/auth/clients/v1/"
+REAL_ORIGIN = "https://portal.maxifyfx.test"
+
+#: Settings a real client actually authenticates under. Note the audience: the
+#: empty string is the correct value, not an unfinished one.
+REAL_B2CORE_SETTINGS = {
+    "B2CORE_JWKS_URL": JWKS_URL,
+    "B2CORE_ORIGIN": REAL_ORIGIN,
+    "B2CORE_JWT_ISSUER": REAL_ISSUER,
+    "B2CORE_JWT_AUDIENCE": "",
+    "B2CORE_JWT_LEEWAY_SECONDS": 30,
+}
+
+
+def real_claims(**overrides) -> dict:
+    """A token body carrying exactly the claims B2CORE sends, and no others.
+
+    No `aud`, no account number, no client type, no combined `name`, no
+    `locale`. The absences are the point of the fixture: each one was a
+    separate way the integration failed, and adding a convenience claim here
+    would put the suite back to testing a service that does not exist.
+    """
+    now = int(time.time())
+    payload = {
+        "sub": "0193c4f2-8a1e-7b3c-9d45-6e7f80112233",
+        "iss": REAL_ISSUER,
+        "iat": now,
+        "nbf": now,
+        "exp": now + 3600,          # sixty minutes, which is what B2CORE gives
+        "email": "client@example.com",
+        "first_name": "زينب",
+        "last_name": "الجبوري",
+        "aal": "aal1",
+        "amr": ["pwd"],
+        "sid": "6f1c2d3e4f5a6b7c",
+        "jti": "01JHQ2Z9K7XW3M8N5P6Q7R8S9T",
+    }
+    payload.update(overrides)
+    return {name: value for name, value in payload.items() if value is not None}
+
+
+def real_token(*, signing_key: str = "ed25519", headers: dict | None = None, **overrides) -> str:
+    """Sign a realistically-shaped token with the Ed25519 fixture key."""
+    pair = key(signing_key)
+    head = {"kid": pair.kid}
+    head.update(headers or {})
+    return jwt.encode(
+        real_claims(**overrides),
+        pair.private_key,
+        algorithm=head.pop("alg", pair.algorithm),
+        headers=head,
+    )

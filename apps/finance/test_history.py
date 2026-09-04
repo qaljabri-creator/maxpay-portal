@@ -305,10 +305,40 @@ class QueueSearchTests(HistoryTestCase):
             {self.first.public_ref, self.second.public_ref},
         )
 
-    def test_by_account_number(self):
+    def test_the_account_number_is_not_searchable(self):
+        """It was, and it cannot be any more.
+
+        B2CORE's token carries no account number — checked against a real one
+        on 4 Sep 2026 — so `Client.account_number` is blank for every client
+        authenticated since, and a query against it could only ever match rows
+        filed before the integration. A search box that invites an operator to
+        type something it will never find is worse than one that does not offer
+        it: the operator concludes the request does not exist.
+
+        The seeded clients here still carry one, which is what makes this
+        assertion meaningful — the column has data and the search still
+        declines to look at it.
+        """
         self.login(self.admin)
+
+        self.assertEqual(self.omars.client.account_number, "MX-90211")
+        self.assertEqual(self.refs_for("MX-90211"), set())
+
+    def test_the_email_is_what_finds_a_client_now(self):
+        """The one identity claim B2CORE does send."""
+        self.login(self.admin)
+
         self.assertEqual(
-            self.refs_for("MX-90211"), {self.omars.public_ref}
+            self.refs_for("omar@example.com"), {self.omars.public_ref}
+        )
+
+    def test_the_verified_subject_still_finds_one(self):
+        """An operator with a support ticket in front of them may have it, and
+        it is the only identifier B2CORE guarantees."""
+        self.login(self.admin)
+
+        self.assertEqual(
+            self.refs_for(self.omars.client.b2core_id), {self.omars.public_ref}
         )
 
     def test_email_search_returns_nothing_without_the_identity_permission(self):

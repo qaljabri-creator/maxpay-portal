@@ -16,7 +16,7 @@ from apps.portal import session as portal_session
 from apps.portal.b2core import Identity
 from apps.portal.sessions import new_store
 
-from .support import B2CORE_SETTINGS
+from .support import B2CORE_SETTINGS, REAL_B2CORE_SETTINGS
 
 
 def identity(**overrides) -> Identity:
@@ -279,3 +279,61 @@ class LazyClientTests(SessionTestCase):
         self.run_middleware(request)
 
         self.assertIsNone(portal_session.current_client(request))
+
+
+@override_settings(**REAL_B2CORE_SETTINGS)
+class RealB2CoreIdentityTests(SessionTestCase):
+    """What the client record looks like for a client B2CORE actually signed in.
+
+    Nothing here is about verification — that is `test_tokens.py`. This is the
+    other half: an identity carrying what B2CORE really sends, written into the
+    record Finance reads.
+    """
+
+    def test_the_name_arrives_composed_rather_than_blank(self):
+        """The two halves are joined in `verify_token`, so by the time an
+        identity reaches the session there is a name. Finance saw «···» for as
+        long as that composition was missing."""
+        client = portal_session.upsert_client(
+            identity(display_name="زينب الجبوري", account_number="")
+        )
+
+        self.assertEqual(client.display_name, "زينب الجبوري")
+
+    def test_the_account_number_is_simply_blank(self):
+        """No claim carries one, and nothing invents one. The column stays
+        empty rather than holding `sub` or `sid` dressed as an account."""
+        client = portal_session.upsert_client(
+            identity(subject="0193c4f2-8a1e", account_number="")
+        )
+
+        self.assertEqual(client.account_number, "")
+        self.assertNotEqual(client.account_number, client.b2core_id)
+
+    def test_the_email_is_stored_because_it_is_what_finance_searches_on(self):
+        client = portal_session.upsert_client(
+            identity(email="client@example.com", account_number="")
+        )
+
+        self.assertEqual(client.email, "client@example.com")
+
+    def test_an_hour_long_token_caps_the_session_at_an_hour(self):
+        """B2CORE's tokens last sixty minutes and the ceiling is eight hours,
+        so the token is what expires the session. The client is re-authenticated
+        hourly through the handshake rather than kept alive past their token.
+        """
+        request = self.make_request()
+        expires = int(time.time()) + 3600
+
+        portal_session.start(request, identity(expires_at=expires, account_number=""))
+
+        self.assertEqual(portal_session.expires_at(request), expires)
+
+    def test_the_ceiling_still_wins_over_a_longer_token(self):
+        """A token good for a week does not buy a week-long portal session."""
+        request = self.make_request()
+        far = int(time.time()) + 60 * 60 * 24 * 7
+
+        portal_session.start(request, identity(expires_at=far, account_number=""))
+
+        self.assertLess(portal_session.expires_at(request), far)

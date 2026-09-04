@@ -556,10 +556,21 @@ posture, and `manage.py check --deploy` says so.
 
 ### Configuration
 
-`B2CORE_ORIGIN` and `B2CORE_JWKS_URL` are required in a real deployment;
-`B2CORE_JWT_ISSUER` and `B2CORE_JWT_AUDIENCE` are verified when set and skipped
-when blank, which `check --deploy` warns about — a blank audience means a token
-B2CORE minted for a different relying party would be accepted here.
+`B2CORE_ORIGIN` and `B2CORE_JWKS_URL` are required in a real deployment. The
+other two used to be described here as "verified when set, skipped when blank,
+and you should set both". One of them must never be set, and the sentence that
+said otherwise was an instruction to break the product:
+
+| | |
+| --- | --- |
+| `B2CORE_JWT_ISSUER` | **Required, and it is not the origin.** B2CORE mints `iss` as its auth service's URL — `api.*`, with a path, trailing slash included. The origin is the portal host with no path. PyJWT compares the claim by string equality, so the origin here, or the right URL with the slash trimmed, refuses every client. Unset is the other failure: any token signed by any key in that JWKS is then believed. `portal.E005` reports both, and `config/settings/prod.py` refuses to boot on either. |
+| `B2CORE_JWT_AUDIENCE` | **Must stay empty. B2CORE sends no `aud` claim.** Not a value waiting to be discovered — there is none. Setting it turns the audience check on, which then rejects every real token for a claim that is never minted. `portal.E006` fires if it is set. |
+
+`portal.E006` is the inversion of a warning that used to say the opposite. It
+warned that an unset audience was unverified and told the operator to set it
+"once B2CORE confirms the audience value". An operator clearing deploy warnings
+before go-live would have taken the portal down for every client. A check that
+gives wrong advice is worse than no check, because it is followed.
 
 Those live in the **deploy** checks rather than the default ones, so a developer
 building the Finance panel can still run `manage.py check` without holding
@@ -2074,10 +2085,19 @@ the reader may not be allowed to open is not an improvement on not linking.
 
 ### Search, and the one term that is a number
 
-Phase 4.2. Reference, client email, and account number were already there.
-Amount is the addition, and it is the one Finance actually types — a client
-quotes "the hundred dollars from Tuesday" far more often than they read a
-reference back.
+Phase 4.2. Reference and client email were already there. Amount is the
+addition, and it is the one Finance actually types — a client quotes "the
+hundred dollars from Tuesday" far more often than they read a reference back.
+
+**The account number was there too, and is not any more.** B2CORE's token
+carries none — checked against a real one on 4 Sep 2026 — so
+`Client.account_number` is blank for every client authenticated since, and the
+clause could only ever have matched rows filed before the integration. A search
+box that invites an operator to type something it will never find is worse than
+one that does not offer it: the operator concludes the request does not exist.
+Email is what identifies a client now, and it is the one identity claim B2CORE
+does send. The verified `sub` still matches too, for an operator holding a
+support ticket.
 
 One box, not four. A search screen that asks *which kind* of thing you are
 about to type is a screen that makes the operator do the parsing, so the term
@@ -2653,11 +2673,23 @@ neither is closed.
   because B2CORE embed builds differ. Narrow it to whatever B2CORE actually
   sends once someone can watch a real frame. The origin check is what guards
   the handshake; this tolerance costs nothing.
-- **Nothing has been tested against a live B2CORE.** The verification suite uses
-  real keys and real signatures, but the JWKS fetch is stubbed and the handshake
-  has never run against the real portal. First contact should confirm three
-  things: the exact message names, the `sub` and account claim names, and that
-  `B2CORE_JWT_ISSUER` and `B2CORE_JWT_AUDIENCE` can be pinned.
+- **A real B2CORE token has now been read; the handshake still has not run.**
+  On 4 Sep 2026 a live token was examined in the browser, and four things this
+  project had assumed turned out to be wrong: the algorithm is `EdDSA` and not
+  RS256, there is no `aud` claim at all, `iss` is `api.*` with a path and a
+  trailing slash rather than a bare origin, and the name arrives as
+  `first_name`/`last_name` with no combined claim. There is no account number
+  and no client type. All four are fixed and tested — `B2CoreShapedTokenTests`
+  in `apps/portal/tests/test_tokens.py` works from that observed payload, and
+  `seed_demo` now stands up a local B2CORE shaped the same way, because a
+  stand-in that models a different service than the one it stands in for is
+  worse than no stand-in: the suite was green throughout while the integration
+  would have refused every real client.
+
+  What is still untested is the *handshake*: the postMessage exchange has never
+  run against the real portal, the JWKS fetch is still stubbed in the suite, and
+  the message names are still assumed. The token's own shape is no longer a
+  guess.
 - **Withdrawal debit timing (spec §6) is implemented, not yet confirmed.** Step
   10 debits at `under_review` — what the spec's own table describes, and what
   stops a client trading funds already committed to a withdrawal. The system

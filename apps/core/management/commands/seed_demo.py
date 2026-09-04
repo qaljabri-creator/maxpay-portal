@@ -20,6 +20,7 @@ cannot be deleted, here or anywhere else.
 """
 
 import json
+import secrets
 import time
 from datetime import time as clock_time
 from decimal import Decimal
@@ -27,12 +28,12 @@ from pathlib import Path
 
 import jwt
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django_otp.plugins.otp_totp.models import TOTPDevice
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import OKPAlgorithm
 
 from apps.accounts.models import Client, Role, User
 from apps.accounts.permissions import sync_role_groups
@@ -61,13 +62,22 @@ TOTP_KEYS = {
     "merchant@maxifyfx.com": "3333333333333333333333333333333333333333",
 }
 
-#: The local stand-in for B2CORE. The issuer and audience are invented; they
-#: exist so the verification path in ``apps/portal/b2core/tokens.py`` runs with
-#: those claims switched on rather than skipped.
-DEV_ISSUER = "https://b2core.local"
-DEV_AUDIENCE = "maxpay-portal"
+#: The local stand-in for B2CORE, shaped like the real one.
+#:
+#: It used to sign RS256, mint an `aud`, and send a combined `name` — none of
+#: which B2CORE does. A stand-in that models a different service than the one it
+#: stands in for is worse than no stand-in: the whole verification path passed
+#: locally for weeks while it would have refused every real token. So this now
+#: signs EdDSA, carries no audience, splits the name in two, and uses an issuer
+#: with a path and a trailing slash, because each of those was a separate way
+#: the integration failed.
+#:
+#: The issuer is still invented — it is not MaxiFyFX's, and pointing local
+#: development at a production issuer would be a way to end up trusting a
+#: production token by accident. Its *shape* is what matters here.
+DEV_ISSUER = "https://api.b2core.local/srvsz/auth/clients/v1/"
 DEV_KID = "maxpay-dev-key-1"
-DEV_ALGORITHM = "RS256"
+DEV_ALGORITHM = "EdDSA"
 
 CLIENT_SUBJECT = "b2core-demo-client-1"
 
@@ -325,12 +335,21 @@ class Command(BaseCommand):
     # -- the local stand-in for B2CORE ------------------------------------
 
     def signing_key(self):
-        """Load the dev RSA key, generating and saving it on first run."""
+        """Load the dev Ed25519 key, generating and saving it on first run.
+
+        A key already on disk from before the switch to EdDSA is regenerated:
+        it is an RSA key, and signing EdDSA with it raises rather than quietly
+        producing something. Nothing is lost — the only thing it ever signed is
+        a demo token.
+        """
         path = self.base_dir / KEY_PATH
         if path.exists():
-            return serialization.load_pem_private_key(path.read_bytes(), password=None)
+            existing = serialization.load_pem_private_key(path.read_bytes(), password=None)
+            if isinstance(existing, ed25519.Ed25519PrivateKey):
+                return existing
+            self.note("replacing the old RSA dev key; B2CORE signs EdDSA")
 
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        key = ed25519.Ed25519PrivateKey.generate()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(
             key.private_bytes(
@@ -343,8 +362,12 @@ class Command(BaseCommand):
         return key
 
     def write_jwks(self, key) -> None:
-        """Publish the public half exactly as a real JWKS endpoint would."""
-        jwk = RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
+        """Publish the public half exactly as a real JWKS endpoint would.
+
+        An `OKP`/`Ed25519` JWK, which is the shape B2CORE's endpoint serves and
+        the shape PyJWK has to be able to read for any of this to work.
+        """
+        jwk = json.loads(OKPAlgorithm.to_jwk(key.public_key()))
         jwk.update({"kid": DEV_KID, "use": "sig", "alg": DEV_ALGORITHM})
         path = self.base_dir / JWKS_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -355,16 +378,25 @@ class Command(BaseCommand):
         self.write_jwks(key)
 
         now = int(time.time())
+        # The claim set observed in a real B2CORE token, and nothing else. No
+        # `aud`, no account number, no combined `name`, no `locale` — every one
+        # of those was in the old fixture and none of them is real, which is
+        # exactly how the integration came to be tested against a service that
+        # does not exist.
+        first, _, last = client.display_name.partition(" ")
         claims = {
             "sub": client.b2core_id,
             "iss": DEV_ISSUER,
-            "aud": DEV_AUDIENCE,
             "iat": now,
+            "nbf": now,
             "exp": now + hours * 3600,
             "email": client.email,
-            "name": client.display_name,
-            "account_number": client.account_number,
-            "locale": "ar-IQ",
+            "first_name": first,
+            "last_name": last,
+            "aal": "aal1",
+            "amr": ["pwd"],
+            "sid": secrets.token_hex(8),
+            "jti": secrets.token_hex(16),
         }
         token = jwt.encode(claims, key, algorithm=DEV_ALGORITHM, headers={"kid": DEV_KID})
 
@@ -444,22 +476,32 @@ class Command(BaseCommand):
 
         self.heading("Client portal without B2CORE")
         self.out(
-            "  There is no real B2CORE here, so this stands one up: a local RSA key, the\n"
-            "  JWKS document a real endpoint would publish, and one signed token. Nothing\n"
-            "  in the verification path is bypassed - the signature is genuinely checked.\n"
+            "  There is no real B2CORE here, so this stands one up: a local Ed25519 key,\n"
+            "  the JWKS a real endpoint would publish, and one token shaped like a real\n"
+            "  one - EdDSA, no audience claim, the name in two halves. Nothing in the\n"
+            "  verification path is bypassed - the signature is genuinely checked.\n"
         )
         self.out("  1. Put these in .env, then restart runserver:\n")
         for line in (
             f"B2CORE_ORIGIN={self.host}",
             f"B2CORE_JWKS_URL={jwks_url}",
             f"B2CORE_JWT_ISSUER={DEV_ISSUER}",
-            f"B2CORE_JWT_AUDIENCE={DEV_AUDIENCE}",
+            # Empty, and it must stay empty: B2CORE mints no `aud`, so setting
+            # this refuses every real token. portal.E006 says so at deploy time.
+            "B2CORE_JWT_AUDIENCE=",
             "PORTAL_ALLOW_STANDALONE=true",
             "PORTAL_SESSION_COOKIE_SAMESITE=Lax",
             "PORTAL_SESSION_COOKIE_SECURE=false",
         ):
             self.out(f"       {line}")
 
+        self.out(
+            "\n  Note: the JWKS above is served by this same runserver, and a dev server\n"
+            "  handling a request cannot reliably fetch from itself - a session POST can\n"
+            "  come back 401 for that reason alone, with nothing wrong with the token.\n"
+            "  It is an artefact of the stand-in; B2CORE's real JWKS is on another host.\n"
+            "  If you hit it, start a second runserver on :8001 and use that one.\n"
+        )
         self.out(
             f"\n  2. Open {self.host}/portal/ , then paste this into the DevTools console\n"
             "     (it hands the token to the session endpoint the way B2CORE would):\n"
