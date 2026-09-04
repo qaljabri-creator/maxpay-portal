@@ -1,28 +1,38 @@
-"""The whole walk, screen 1 to screen 6, in order.
+"""The client's compose screen, and the walk the server still sees behind it.
 
 This module exists because of a bug the rest of the suite could not have
-caught. Reversing the wizard so the merchant comes before the method (25 Aug
-2026) updated the `WIZARD` array in ``flow.js`` and three of the four places
-that navigated forward. The fourth — the handler on screen 1 — went on sending
-the client to ``"method"`` by name, over the top of the merchant screen, into a
-method list that is *correctly* empty until a merchant has been chosen.
-
-Every existing test passed. They check the steps one at a time: ask for the
+caught. When the merchant was moved in front of the method (25 Aug 2026) the
+`WIZARD` array in ``flow.js`` was updated and three of the four places that
+navigated forward; the fourth — the handler on screen 1 — went on sending the
+client to ``"method"`` by name, over the top of the merchant screen, into a
+method list that is *correctly* empty until a merchant has been chosen. Every
+existing test passed, because they check the steps one at a time: ask for the
 merchants and get merchants, ask for a merchant's methods and get methods. None
-of them asked what the client is shown *next*, which is the only question that
-was wrong.
+asked what the client is shown *next*, which is the only question that was
+wrong.
 
-So there are two halves here, and they check different things:
+**The wizard is gone.** The four screens are one: the three choices sit in a
+row, all of them on screen at once, and the details appear underneath when the
+third is answered. There is no forward navigation left to get wrong — nothing
+to advance to.
 
-* :class:`StepOrderTests` reads ``flow.js`` and asserts the order the wizard
-  declares, and that no forward move names its destination. Forward navigation
-  goes through ``advance()``, which reads the array — one source for the order,
-  so the two cannot disagree again. This is the half that would have failed.
-* :class:`WalkTests` drives the server through the same sequence the screens
-  do, and asserts at each step both what has arrived and what has *not*: the
-  methods are absent until a merchant is chosen, the wallet is absent until a
-  method is. That is why the skipped screen produced a blank box rather than an
-  error, and it is worth pinning down.
+What survived the restructure is the *reason* the bug happened, and so the
+reason for this module: the order those three choices depend on each other in
+was written down twice, and the two copies drifted. It is written down once now
+(``CHAIN``), and the two halves below check different things:
+
+* :class:`PickerChainTests` reads ``flow.js`` and ``flow.html`` and asserts the
+  chain is declared once and derived from everywhere — the unlocking, the
+  resetting, and whether the details are shown. It also pins the three
+  properties the row exists for: all three columns are always in the DOM, a
+  locked column offers nothing, and the details are not on screen until every
+  answer is in.
+* :class:`WalkTests` and the classes after it drive the *server* through the
+  same sequence, and assert at each step both what has arrived and what has
+  *not*: the methods are absent until a merchant is chosen, the wallet absent
+  until a method is. None of that moved — the endpoints, the payloads and the
+  filtering rules are exactly what they were, and the row asks for them in the
+  same order the wizard did. That is why these tests are unchanged.
 """
 
 import json
@@ -38,75 +48,195 @@ from apps.transactions.models import Request, RequestStatus
 from .test_flow import FlowTestCase
 
 FLOW_JS = Path(settings.BASE_DIR) / "static" / "js" / "flow.js"
+FLOW_HTML = Path(settings.BASE_DIR) / "templates" / "portal" / "flow.html"
+FLOW_CSS = Path(settings.BASE_DIR) / "static" / "css" / "flow.css"
 
-#: The wizard, in the order the client meets it (spec §7). Screens 5 and 6 are
-#: outcomes rather than steps and are deliberately not in it.
-EXPECTED_ORDER = ["type", "merchant", "method", "details"]
+#: The three answers a request is made of, in the order they depend on each
+#: other (spec §7). The details are not in it: they are what the chain produces,
+#: not a link in it.
+EXPECTED_CHAIN = ["type", "merchant", "method"]
+
+#: The id of each column in the row, keyed by the step it answers.
+COLUMN_IDS = {
+    "type": "pick-type",
+    "merchant": "pick-merchant",
+    "method": "pick-method",
+}
 
 
-class StepOrderTests(SimpleTestCase):
-    """What the script says about its own order."""
+class PickerChainTests(SimpleTestCase):
+    """What the row says about itself."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.source = FLOW_JS.read_text(encoding="utf-8")
+        cls.markup = FLOW_HTML.read_text(encoding="utf-8")
+        cls.styles = FLOW_CSS.read_text(encoding="utf-8")
 
-    def declared_order(self) -> list[str]:
-        match = re.search(r"var WIZARD = (\[[^\]]*\]);", self.source)
-        self.assertIsNotNone(match, "flow.js no longer declares a WIZARD array")
+    def declared_chain(self) -> list[str]:
+        match = re.search(r"var CHAIN = (\[[^\]]*\]);", self.source)
+        self.assertIsNotNone(match, "flow.js no longer declares a CHAIN array")
         return json.loads(match.group(1))
 
-    def test_the_wizard_is_declared_in_the_order_the_client_meets_it(self):
-        self.assertEqual(self.declared_order(), EXPECTED_ORDER)
+    # -- the order, declared once ------------------------------------------
+
+    def test_the_chain_is_declared_in_the_order_the_client_meets_it(self):
+        self.assertEqual(self.declared_chain(), EXPECTED_CHAIN)
 
     def test_the_merchant_comes_before_the_method(self):
         """The reversal itself, asserted on its own so a future edit that
-        reorders the array has to come here and say so."""
-        order = self.declared_order()
-        self.assertLess(order.index("merchant"), order.index("method"))
+        reorders the chain has to come here and say so."""
+        chain = self.declared_chain()
+        self.assertLess(chain.index("merchant"), chain.index("method"))
 
-    def test_no_forward_move_names_the_screen_it_goes_to(self):
-        """The bug in one line.
+    def test_nothing_navigates_to_a_step_by_name(self):
+        """The original bug, and it is now unrepresentable.
 
-        A ``go("merchant")`` or ``go("method")`` or ``go("details")`` anywhere
-        is a second copy of the order, and a second copy is a copy that can
-        disagree. Forward navigation goes through ``advance()``, which reads
-        the array.
-
-        Backward moves may still name a screen — a chip on screen 4 goes
-        straight to the one it stands for, and that is a jump *to a known
-        earlier* screen, not an assumption about what comes next. Those are
-        written with ``replace: true`` or through ``retreat()``.
+        A ``go("merchant")`` was a second copy of the order. There are no such
+        screens left to name — answering a step unlocks the next column in
+        place — so any survivor is a reference to a screen that no longer
+        exists.
         """
-        forward = re.findall(r'\bgo\("(merchant|method|details)"(?!\s*,\s*\{)', self.source)
+        named = re.findall(r'\bgo\("(type|merchant|method|details)"', self.source)
         self.assertEqual(
-            forward,
-            [],
-            "a wizard screen is navigated to by name; use advance() instead",
+            named, [], "flow.js navigates to a screen the restructure removed"
         )
 
-    def test_advance_is_what_the_screens_call(self):
-        calls = re.findall(r'\badvance\("(\w+)"\)', self.source)
-        # One per step that has a next: type → merchant → method → details.
-        self.assertEqual(calls, ["type", "merchant", "method"])
+    def test_the_wizard_machinery_is_gone_rather_than_left_lying_about(self):
+        """`advance()` and `retreat()` existed to get forward movement right.
 
-    def test_advance_reads_the_array_rather_than_a_second_list(self):
+        There is no forward movement. Leaving them behind would leave a second
+        way to express the order, which is the whole failure this module is
+        named after.
+        """
+        for dead in ("function advance(", "function retreat(", "var WIZARD"):
+            self.assertNotIn(dead, self.source, f"{dead} survived the restructure")
+
+    # -- everything derived from it ----------------------------------------
+
+    def test_unlocking_walks_the_chain_rather_than_naming_three_columns(self):
         body = re.search(
-            r"function advance\(from\) \{(.*?)\n  \}", self.source, re.S
+            r"function renderPicker\(\) \{(.*?)\n  \}", self.source, re.S
         )
-        self.assertIsNotNone(body, "advance() is gone")
-        self.assertIn("WIZARD.indexOf(from)", body.group(1))
+        self.assertIsNotNone(body, "renderPicker() is gone")
+        self.assertIn("CHAIN.forEach", body.group(1))
 
-    def test_every_choice_screen_has_an_empty_state_to_render_into(self):
+    def test_changing_an_answer_clears_the_rest_by_reading_the_chain(self):
+        """"Reset everything after this one" is the chain's own question.
+
+        Written as three handlers each listing what it invalidates, it is three
+        copies of the order — and the one that forgets an entry leaves a method
+        selected under a merchant who no longer offers it.
+        """
+        body = re.search(
+            r"function resetAfter\(step\) \{(.*?)\n  \}", self.source, re.S
+        )
+        self.assertIsNotNone(body, "resetAfter() is gone")
+        self.assertIn("CHAIN.indexOf(step) + 1", body.group(1))
+
+    def test_every_choice_handler_resets_what_came_after_it(self):
+        """One call per step that has anything after it — and the last one too,
+        since a method change still drops the wallet."""
+        calls = re.findall(r'\bresetAfter\("(\w+)"\)', self.source)
+        self.assertEqual(calls, EXPECTED_CHAIN)
+
+    def test_every_step_in_the_chain_knows_how_to_identify_its_answer(self):
+        """`KEY_OF` is what marks the chosen row in each column.
+
+        The three answers do not agree on a shape — a merchant has an `id`, a
+        method a `code`, the direction is the string — so a step added to the
+        chain without an entry here would render a column in which nothing ever
+        looks selected.
+        """
+        block = re.search(r"var KEY_OF = \{(.*?)\n  \};", self.source, re.S)
+        self.assertIsNotNone(block, "flow.js no longer declares KEY_OF")
+        for step in self.declared_chain():
+            self.assertRegex(
+                block.group(1), rf"\b{step}\s*:", f"KEY_OF has no rule for {step!r}"
+            )
+
+    # -- what the row is for -----------------------------------------------
+
+    def test_all_three_columns_are_always_in_the_dom(self):
+        """The point of the restructure. A client can see every choice they
+        have made and every one still to make, without navigating."""
+        for step, element_id in COLUMN_IDS.items():
+            match = re.search(
+                r'<div class="picker__col" id="' + re.escape(element_id) + r'"(?P<rest>[^>]*)>',
+                self.markup,
+            )
+            self.assertIsNotNone(match, f"the {step} column is not in flow.html")
+            self.assertNotIn(
+                "hidden",
+                match.group("rest"),
+                f"the {step} column ships hidden; all three are always on screen",
+            )
+
+    def test_a_locked_column_offers_nothing_and_says_what_it_waits_for(self):
+        """Dimming a list of merchants while no direction is chosen would be
+        showing an answer to a question nobody asked — and those merchants are
+        the *deposit* ones, because that is what the server defaults to."""
+        for step in ("merchant", "method"):
+            self.assertIn(f'id="{step}-wait"', self.markup, step)
+            self.assertIn(f'show(nodes.{step}Choices,', self.source, step)
+
+    def test_the_details_ship_hidden_and_are_shown_by_the_chain(self):
+        match = re.search(r'<div class="details" id="details"(?P<rest>[^>]*)>', self.markup)
+        self.assertIsNotNone(match, "the details block is not in flow.html")
+        self.assertIn(
+            "hidden",
+            match.group("rest"),
+            "the details are on screen before anything has been chosen",
+        )
+        self.assertIn("show(nodes.details,", self.source)
+
+    def test_the_details_can_actually_be_hidden(self):
+        """`.details` sets a display, so `[hidden]` on it is inert without a
+        companion rule — the trap that put the withdrawal proof upload back on
+        screen. Asserted here as well as in the withdrawal suite because this
+        block is the one the whole restructure hangs on."""
+        self.assertRegex(
+            self.styles,
+            r"(?m)^\.details\[hidden\]\s*\{[^}]*display\s*:\s*none",
+            "static/css/flow.css needs `.details[hidden] { display: none; }`",
+        )
+
+    def test_a_locked_column_s_list_can_actually_be_hidden(self):
+        """Same rule, same reason: `.choices` sets `display: flex`."""
+        self.assertRegex(
+            self.styles,
+            r"(?m)^\.choices\[hidden\]\s*\{[^}]*display\s*:\s*none",
+            "static/css/flow.css needs `.choices[hidden] { display: none; }`",
+        )
+
+    def test_the_row_collapses_to_one_column_on_a_phone(self):
+        """Column first, grid only once there is width for three legible ones.
+
+        Written this way round on purpose: a three-column grid squeezed onto a
+        phone is not a smaller version of this design, it is captions wrapping
+        mid-word.
+        """
+        base = re.search(r"(?m)^\.picker \{([^}]*)\}", self.styles)
+        self.assertIsNotNone(base, "the .picker rule is gone")
+        self.assertIn("flex-direction: column", base.group(1))
+        self.assertRegex(
+            self.styles,
+            r"@media \(min-width: \d+rem\) \{\s*\.picker \{[^}]*grid-template-columns",
+            "the three-column layout is not behind a min-width media query",
+        )
+
+    def test_every_column_has_an_empty_state_to_render_into(self):
         """A list that came back empty is a fact the client is owed a reason
         for. A bordered box with nothing in it is not one."""
-        for screen in ("type", "merchant", "method"):
-            self.assertIn(f'el("{screen}-empty-text")', self.source, screen)
+        for step in EXPECTED_CHAIN:
+            self.assertIn(f'el("{step}-empty-text")', self.source, step)
 
-    def test_the_empty_method_screen_explains_the_case_that_broke(self):
+    def test_the_empty_method_column_still_explains_the_case_that_broke(self):
         """No merchant chosen means no methods to list — the correct answer to
-        a question the client was never asked. It says so now."""
+        a question the client was never asked. The column is locked before that
+        happens now, so it should be unreachable; the wording stays because an
+        emptiness arriving out of order should still say why."""
         self.assertIn("methodNoMerchant", self.source)
 
 

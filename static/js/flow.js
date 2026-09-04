@@ -1,33 +1,52 @@
 /* =========================================================================
    MaxPay — the client request flow (spec §7), build-order step 6
    -------------------------------------------------------------------------
-   Six screens, driven from the JSON in apps/portal/flow_views.py:
+   Three screens, driven from the JSON in apps/portal/flow_views.py:
 
-     1 type      what kind of request
-     2 merchant  who to pay
-     3 method    which of that merchant's methods
-     4 details   deposit:    wallet number + copy, amount with a live IQD
+     compose   the whole request on one screen —
+               a row of three choices: type, merchant, method
+               and, beneath it once all three are answered, the details:
+                 deposit:    wallet number + copy, amount with a live IQD
                              figure, proof upload, optional message
                  withdrawal: destination account, amount with a live IQD
                              figure, optional message
-     5 confirm   the reference
-     6 request   status timeline, attachments, thread
+     confirm   the reference
+     request   status timeline, attachments, thread
 
-   Plus one screen that is not a step (build-order step 11): `closed`. Spec §7
-   replaces every submission screen with a notice and a live countdown when the
-   desk is shut, so screens 1 to 4 become unreachable and the countdown becomes
+   **It was a four-step wizard and is not any more.** Type, merchant, method and
+   details were four screens walked in order, and the order was the whole of the
+   navigation: `WIZARD`, `advance()`, `retreat()`, a trail, a step counter and a
+   progress bar. All of it is gone. The three choices are a row across the top,
+   every one of them on screen from the first paint, and the details appear
+   underneath the moment the third is answered.
+
+   What made the wizard worth replacing is not that it was slow. It is that a
+   client could not see what they had already chosen, and changing the first
+   answer was three taps away from where they were standing.
+
+   `CHAIN` is what is left of the order, and it is now the *only* copy of it.
+   The wizard kept the order in an array and again in the screen each handler
+   named by hand; the two drifted, and screen 1 spent a while sending clients
+   past the merchant into a method list that is empty by construction until a
+   merchant is chosen. Unlocking, resetting and whether the details are shown
+   all read CHAIN. Nothing restates it.
+
+   The merchant comes before the method: the client settles who they are handing
+   money to first, and only then sees what that merchant covers. The method
+   column is therefore that *merchant's* methods, never the whole catalogue —
+   and it stays locked, showing what it is waiting for, until there is one.
+
+   The direction is state, not a second flow (step 10). The row is identical in
+   both, and the details show whichever half the server’s `needs` object named —
+   never a guess made here, so the form cannot collect a field the submission
+   would refuse.
+
+   Plus one screen that is not part of it (build-order step 11): `closed`. Spec
+   §7 replaces every submission screen with a notice and a live countdown when
+   the desk is shut, so `compose` becomes unreachable and the countdown becomes
    the page. The server decides — the schedule is never evaluated here — and it
    refuses a submission independently, so getting past this screen gets nobody
    anywhere.
-
-   The merchant comes before the method: the client settles who they are handing
-   money to first, and only then sees what that merchant covers. Screen 3 is
-   therefore the *merchant's* methods, never the whole catalogue.
-
-   The direction is state, not a second wizard (step 10). Screens 1 to 3 are the
-   same in both, and screen 4 shows whichever half the server’s `needs` object
-   named — never a guess made here, so the form cannot collect a field the
-   submission would refuse.
 
    Three rules run through it:
 
@@ -58,10 +77,7 @@
   /* --- vocabulary -------------------------------------------------------- */
 
   var TITLES = {
-    type: "نوع الطلب",
-    method: "طريقة الدفع",
-    merchant: "التاجر",
-    details: "تفاصيل الإيداع",
+    compose: "طلب جديد",
     confirm: "تم الإرسال",
     request: "طلبك",
     closed: "خارج أوقات العمل"
@@ -97,9 +113,37 @@
     return WORDING[state.type] || WORDING.deposit;
   }
 
-  /* The wizard proper. The confirmation and the request view sit outside it —
-     they are outcomes, not steps, and showing "5 / 4" would be nonsense. */
-  var WIZARD = ["type", "merchant", "method", "details"];
+  /* The three answers a request is made of, in the order they depend on each
+     other: which direction, then whom, then how. Not a sequence of screens any
+     more — all three are on screen at once — but still a chain, because the
+     merchants offered depend on the direction and the methods on the merchant.
+
+     **This array is the only declaration of that order.** Unlocking reads it,
+     resetting reads it, and whether the details are shown reads it. The wizard
+     it replaced kept the order in an array *and* in the screen each handler
+     named, the two drifted apart, and screen 1 spent a while sending clients
+     straight past the merchant into a method list that is empty by
+     construction until a merchant has been chosen. One declaration, so there
+     is nothing for it to disagree with. */
+  var CHAIN = ["type", "merchant", "method"];
+
+  /* How each answer identifies itself, because the three do not agree: a
+     merchant carries an `id`, a method a `code`, and the direction is the
+     string. Written once per step here and read by both halves that need it —
+     the renderer stamping `data-key` on a row, and markChosen() deciding which
+     row is the answer. Guessing the shape (`answer.id || answer`) would have
+     silently marked nothing in the method column, which has no `id`. */
+  var KEY_OF = {
+    type: function (value) { return String(value); },
+    merchant: function (value) { return String(value.id); },
+    method: function (value) { return String(value.code); }
+  };
+
+  /* Spec §7: outside business hours every submission screen is replaced by the
+     closed notice. There is one now. The confirmation and the request view are
+     outcomes rather than submissions and stay reachable — yanking away a
+     reference the client is still reading would lose it. */
+  var SUBMISSION_SCREENS = ["compose"];
 
   var MESSAGES = {
     no_session: "انتهت الجلسة. جارٍ إعادة الاتصال بحسابك.",
@@ -138,13 +182,12 @@
       deposit: "لا يوجد تاجر يستقبل الإيداع الآن. كل التجار متوقفون أو بلا محفظة نشطة. جرّب لاحقًا أو تواصل مع الدعم.",
       withdrawal: "لا يوجد تاجر ينفّذ السحب الآن. جرّب لاحقًا أو تواصل مع الدعم."
     },
-    /* The first of these is the one the reversal broke: no merchant chosen
-       means no methods to list, so an empty screen 3 was the *correct* answer
-       to a question the client had never been asked. It says so now instead of
-       showing a blank box. */
-    methodNoMerchant: "لم تختر تاجرًا بعد، ولهذا لا توجد طرق تُعرض. ارجع خطوة واختر التاجر أولًا.",
-    methodNoMerchantAction: "ارجع واختر تاجرًا",
-    methodAction: "اختر تاجرًا آخر",
+    /* Kept, though the case that produced it is now unreachable by
+       construction: a locked column shows what it is waiting for and renders no
+       list at all, so an empty method column can only mean the merchant covers
+       nothing. This is the answer if one ever arrives out of that order —
+       fail-legible rather than a blank box. */
+    methodNoMerchant: "لم تختر تاجرًا بعد، ولهذا لا توجد طرق تُعرض. اختر التاجر أولًا.",
     method: {
       deposit: "هذا التاجر لا يغطي أي طريقة تصلح للإيداع الآن. اختر تاجرًا آخر.",
       withdrawal: "هذا التاجر لا يغطي أي طريقة تصلح للسحب الآن. اختر تاجرًا آخر."
@@ -155,19 +198,28 @@
     return table[state.type] || table.deposit;
   }
 
+  /* Something answered earlier stopped being offerable. The wizard had to name
+     a screen to send the client back to; the row does not, because the column
+     that fixes it is already in front of them and clearing the answer is what
+     makes it obvious which one. So these carry the sentence and nothing else. */
   var UNAVAILABLE = {
-    rate: { screen: "type", text: "لم يُحدَّد سعر الصرف بعد. تواصل مع الدعم." },
-    merchant: { screen: "merchant", text: "التاجر الذي اخترته لم يعد متاحًا." },
-    method: { screen: "method", text: "هذه الطريقة لم تعد متاحة لدى هذا التاجر." },
-    wallet: { screen: "method", text: "لا توجد محفظة نشطة لهذه الطريقة. اختر طريقة أخرى." }
+    rate: "لم يُحدَّد سعر الصرف بعد. تواصل مع الدعم.",
+    merchant: "التاجر الذي اخترته لم يعد متاحًا.",
+    method: "هذه الطريقة لم تعد متاحة لدى هذا التاجر.",
+    wallet: "لا توجد محفظة نشطة لهذه الطريقة. اختر طريقة أخرى."
   };
 
   /* --- state ------------------------------------------------------------- */
 
   var state = {
-    screen: "type",
+    screen: "compose",
     trail: [],
-    type: "deposit",
+    /* Null, not "deposit": the row starts with nothing answered, and the
+       merchant column stays locked until it is. The options endpoint defaults
+       an absent type to deposit exactly as it always has, and `query()` drops
+       a null parameter — so the first catalogue call is byte for byte the one
+       the wizard made, while the screen shows no direction as chosen. */
+    type: null,
     method: null,
     merchant: null,
     wallet: null,
@@ -178,7 +230,7 @@
     needs: { wallet: true, destination: false, proof: true },
     /* The last answer about business hours (step 11). Null until the first
        options call answers; treated as open until then, because a client who
-       arrives during a network hiccup should meet the wizard and be refused by
+       arrives during a network hiccup should meet the compose screen and be refused by
        the server, not meet a closed notice the server never sent. */
     hours: null,
     reference: null,
@@ -197,10 +249,18 @@
   var nodes = {
     back: el("app-back"),
     title: el("app-title"),
-    step: el("app-step"),
-    progress: el("app-progress"),
-    progressBar: el("app-progress-bar"),
     toast: el("toast"),
+
+    /* The row, and the block under it. Keyed by the step names in CHAIN so
+       renderPicker() can walk the chain rather than name three columns. */
+    picker: el("picker"),
+    details: el("details"),
+    detailsTitle: el("details-title"),
+    columns: {
+      type: el("pick-type"),
+      merchant: el("pick-merchant"),
+      method: el("pick-method")
+    },
 
     typeChoices: el("type-choices"),
     typeEmpty: el("type-empty"),
@@ -211,17 +271,16 @@
     methodChoices: el("method-choices"),
     methodEmpty: el("method-empty"),
     methodEmptyText: el("method-empty-text"),
-    methodEmptyBack: el("method-empty-back"),
+    methodWait: el("method-wait"),
 
     merchantChoices: el("merchant-choices"),
     merchantEmpty: el("merchant-empty"),
     merchantEmptyText: el("merchant-empty-text"),
-    merchantEmptyBack: el("merchant-empty-back"),
+    merchantWait: el("merchant-wait"),
 
     methodLead: el("method-lead"),
     merchantLead: el("merchant-lead"),
 
-    chips: el("details-chips"),
     walletBlock: el("wallet-block"),
     walletLabel: el("wallet-label"),
     walletCopy: el("wallet-copy"),
@@ -481,7 +540,7 @@
     }
 
     if (hours.open) {
-      // Reopened while the notice was on screen. Start the wizard over rather
+      // Reopened while the notice was on screen. Start a fresh request rather
       // than resuming it: whatever was chosen before closing is stale by the
       // length of a night.
       if (state.screen === "closed") { restart(); }
@@ -489,10 +548,11 @@
     }
 
     renderClosed();
-    // Only the wizard is replaced. A confirmation the client is still reading,
-    // or a request they have open, is an outcome rather than a submission
-    // screen, and yanking either away would lose them a reference (spec §7).
-    if (WIZARD.indexOf(state.screen) !== -1) {
+    // Only the compose screen is replaced. A confirmation the client is still
+    // reading, or a request they have open, is an outcome rather than a
+    // submission screen, and yanking either away would lose them a reference
+    // (spec §7).
+    if (SUBMISSION_SCREENS.indexOf(state.screen) !== -1) {
       go("closed", { replace: true, reset: true });
     }
   }
@@ -524,7 +584,7 @@
     var left = Math.round((clock.endsAt - Date.now()) / 1000);
     nodes.countdownValue.textContent = duration(left);
     if (left <= 0 && clock.tick) {
-      // The recheck timer is what reopens the wizard; stop counting past zero
+      // The recheck timer is what reopens the compose screen; stop counting past zero
       // rather than showing a client a countdown that has plainly finished.
       window.clearInterval(clock.tick);
       clock.tick = null;
@@ -552,7 +612,7 @@
     // Spec §7: while the desk is shut no submission screen exists. Enforced on
     // the one function every screen change goes through, so a new caller
     // cannot forget it.
-    if (isClosed() && WIZARD.indexOf(screen) !== -1) {
+    if (isClosed() && SUBMISSION_SCREENS.indexOf(screen) !== -1) {
       screen = "closed";
       settings = { replace: true, reset: true };
     }
@@ -563,22 +623,11 @@
 
     state.screen = screen;
     app.setAttribute("data-screen", screen);
-    nodes.title.textContent =
-      screen === "details" ? words().title : (TITLES[screen] || TITLES.type);
+    // The compose screen is titled for the whole request rather than for the
+    // step being answered; there are no steps left to name.
+    nodes.title.textContent = TITLES[screen] || TITLES.compose;
 
     show(nodes.back, state.trail.length > 0);
-
-    var index = WIZARD.indexOf(screen);
-    if (index === -1) {
-      show(nodes.step, false);
-      show(nodes.progress, false);
-    } else {
-      show(nodes.step, true);
-      show(nodes.progress, true);
-      nodes.step.textContent = (index + 1) + " / " + WIZARD.length;
-      nodes.progressBar.style.width =
-        Math.round(((index + 1) / WIZARD.length) * 100) + "%";
-    }
 
     // The frame does not scroll with the host page, so a new screen has to put
     // itself back at the top explicitly.
@@ -587,38 +636,96 @@
     nodes.title.focus({ preventScroll: true });
   }
 
-  /* Forward navigation is always "the step after this one", never a screen
-     named at the call site.
+  /* --- the row ------------------------------------------------------------
 
-     It was named at the call site once, and the order then lived in two
-     places: this array and four hardcoded go() calls. Reversing the wizard
-     updated the array and three of the four, and screen 1 went on sending the
-     client to "method" — over the top of the merchant screen, which therefore
-     never rendered, into a method list that is empty by construction until a
-     merchant has been chosen. One source of the order, so the two cannot
-     disagree again. */
-  function advance(from) {
-    var next = WIZARD[WIZARD.indexOf(from) + 1];
-    if (!next) { return; }
-    go(next);
+     Three columns, always on screen, each unlocked by the one before it. The
+     whole of that behaviour is derived from CHAIN — no column names its
+     neighbour, no handler lists what it invalidates. */
+
+  /* What has been answered at each step. One function, so "is this answered"
+     is asked the same way by the unlocking, the resetting and the details. */
+  function answerAt(step) {
+    if (step === "type") { return state.type; }
+    if (step === "merchant") { return state.merchant; }
+    return state.method;
   }
 
-  /* Going *back* to a named screen, which is not the same as going to it.
-     The trail is what the back control reads, so navigating backwards with
-     go() would push the move onto the trail and leave back() bouncing between
-     two screens. This rewinds instead, and falls back to a clean restart at
-     that screen when there is no trail to rewind — which is the state a client
-     is in after an `unavailable` reset. */
-  function retreat(screen) {
-    while (state.trail.length && state.trail[state.trail.length - 1] !== screen) {
-      state.trail.pop();
-    }
-    if (state.trail.length) {
-      back();
-      return;
-    }
-    go(screen, { replace: true, reset: true });
+  function clearAnswerAt(step) {
+    if (step === "type") { state.type = null; return; }
+    if (step === "merchant") { state.merchant = null; return; }
+    state.method = null;
   }
+
+  /* Changing an answer drops every answer that depended on it, and nothing
+     that did not — read off the chain rather than remembered by each handler.
+     The wallet goes with any of them: it belongs to a merchant *and* a method,
+     so there is no step it survives. */
+  function resetAfter(step) {
+    CHAIN.slice(CHAIN.indexOf(step) + 1).forEach(clearAnswerAt);
+    state.wallet = null;
+  }
+
+  /* Draw the row from the state, and decide whether the details belong under
+     it. Called after every answer and after every options payload, because the
+     catalogue is also what can take an answer away. */
+  function renderPicker() {
+    var unlocked = true;
+
+    CHAIN.forEach(function (step) {
+      var column = nodes.columns[step];
+      var open = unlocked;
+      if (column) {
+        column.classList.toggle("picker__col--locked", !open);
+        column.classList.toggle("picker__col--done", Boolean(answerAt(step)));
+      }
+      unlocked = open && Boolean(answerAt(step));
+    });
+
+    // A locked column says what it is waiting for and offers nothing. Not
+    // merely disabled: the merchants behind the merchant column while no
+    // direction is chosen are the *deposit* merchants, and showing them greyed
+    // would be showing an answer to a question nobody asked.
+    var typeChosen = Boolean(state.type);
+    show(nodes.merchantWait, !typeChosen);
+    show(nodes.merchantChoices, typeChosen);
+    show(nodes.merchantEmpty, typeChosen && nodes.merchantEmpty.dataset.empty === "1");
+
+    var merchantChosen = Boolean(state.merchant);
+    show(nodes.methodWait, !merchantChosen);
+    show(nodes.methodChoices, merchantChosen);
+    show(nodes.methodEmpty, merchantChosen && nodes.methodEmpty.dataset.empty === "1");
+
+    markChosen(nodes.typeChoices, "type");
+    markChosen(nodes.merchantChoices, "merchant");
+    markChosen(nodes.methodChoices, "method");
+
+    // `unlocked` has walked the whole chain by now, so it is true only when
+    // every step is answered. That is exactly when the details describe a real
+    // request; before it they would be quoting a rate for nothing.
+    show(nodes.details, unlocked);
+  }
+
+  /* Which option in a column is the current answer. Written as a data
+     attribute at render time and compared here, so re-rendering a list does
+     not lose the mark and choosing does not have to hunt for the old one. */
+  function markChosen(container, step) {
+    var answer = answerAt(step);
+    var key = answer === null || answer === undefined ? null : KEY_OF[step](answer);
+    Array.prototype.forEach.call(container.children, function (button) {
+      var mine = key !== null && button.getAttribute("data-key") === key;
+      button.classList.toggle("choice--chosen", mine);
+      button.setAttribute("aria-pressed", mine ? "true" : "false");
+    });
+  }
+
+  /* `advance()` and `retreat()` are gone with the wizard. Forward movement was
+     the thing they existed to get right — the order lived in an array *and* in
+     the screen each handler named, and the two drifted. There is nowhere to
+     advance to now: answering a step unlocks the next column in place, and
+     `renderPicker()` reads CHAIN for that. Going back to a step is choosing in
+     its column, which is already on screen.
+
+     `back()` stays, for the two screens still outside the compose one. */
 
   function back() {
     var previous = state.trail.pop();
@@ -628,9 +735,15 @@
   }
 
   function restart() {
+    // The whole chain, including the direction. A new request starts with
+    // nothing answered — the row locks back down to its first column, which is
+    // what "a new request" looks like now that there is no screen 1 to return
+    // to.
+    state.type = null;
     state.method = null;
     state.merchant = null;
     state.wallet = null;
+    state.rate = null;
     state.proof = null;
     state.reference = null;
     state.threadFor = null;
@@ -641,7 +754,8 @@
     show(nodes.submitError, false);
     renderDirection();
     renderQuote();
-    go("type", { replace: true, reset: true });
+    renderPicker();
+    go("compose", { replace: true, reset: true });
     show(nodes.back, false);
     loadHistory();
     loadOptions();
@@ -700,22 +814,23 @@
     renderTypeAvailability(data);
     renderMerchants(data.merchants || []);
     renderMethods(data.methods || []);
-    renderChips();
 
     if (data.wallet) {
       state.wallet = data.wallet;
       renderWallet();
     }
     renderQuote();
+    // After the lists, because it marks the chosen option in each of them and
+    // decides whether the details belong under the row.
+    renderPicker();
 
     if (!data.unavailable) { return; }
 
     var problem = UNAVAILABLE[data.unavailable];
     if (!problem) { return; }
 
-    // Something chosen on an earlier screen stopped being offerable. Drop what
-    // depended on it and put the client back on the screen that can fix it,
-    // rather than letting them submit into a dead end.
+    // Something answered earlier stopped being offerable. Drop what depended
+    // on it rather than letting the client submit into a dead end.
     // Everything downstream of the thing that went away, and nothing upstream
     // of it: a merchant who has gone takes their methods with them, but a
     // method that has gone leaves the merchant perfectly choosable.
@@ -725,10 +840,11 @@
       state.method = null;
       state.wallet = null;
     }
-    toast(data.detail || problem.text);
-    if (WIZARD.indexOf(state.screen) > WIZARD.indexOf(problem.screen)) {
-      go(problem.screen, { replace: true });
-    }
+    toast(data.detail || problem);
+    // No screen to send them back to: the column that fixes it is already in
+    // front of them, and clearing the answer above is what makes it the one
+    // asking to be answered.
+    renderPicker();
   }
 
   function loadHistory() {
@@ -758,18 +874,18 @@
     var button = event.target.closest("[data-type]");
     if (!button || button.disabled) { return; }
     state.type = button.getAttribute("data-type");
-    state.method = null;
-    state.merchant = null;
-    state.wallet = null;
-    /* The rate is per direction (spec §5), and so is everything screen 4
-       collects. Dropping both here means a client who steps back to screen 1
-       and switches can never submit against the other direction's figures —
-       loadOptions() fills them in again for the direction they just chose. */
+    // Everything that depended on the direction, read off the chain rather
+    // than listed here — the two columns to its right, and the wallet.
+    resetAfter("type");
+    /* The rate is per direction (spec §5), and so is everything the details
+       collect. Dropping both here means a client who switches direction can
+       never submit against the other one's figures — loadOptions() fills them
+       in again for the direction they just chose. */
     state.rate = null;
     clearProof();
     clearDestination();
     renderDirection();
-    advance("type");
+    renderPicker();
     loadOptions();
   });
 
@@ -827,20 +943,28 @@
      client is standing on rather than one tap later, and worded per direction
      because the other one may be perfectly fine. */
   function renderTypeAvailability(data) {
-    var blocked = !state.rate || (data.merchants || []).length === 0;
+    // Only once a direction has been chosen. Before that the catalogue on hand
+    // is the server's default one, and "no merchant takes deposits" is not an
+    // answer to a question the client has asked yet.
+    var blocked = Boolean(state.type)
+      && (!state.rate || (data.merchants || []).length === 0);
     show(nodes.typeEmpty, blocked);
     if (blocked) {
       nodes.typeEmptyText.textContent = emptyText(EMPTY.type);
     }
   }
 
-  /* --- screen 2: the merchant --------------------------------------------- */
+  /* --- the merchant column ------------------------------------------------ */
 
   function renderMerchants(merchants) {
     clear(nodes.merchantChoices);
 
+    /* Whether the list is empty, and whether the column is unlocked, are two
+       different facts and only renderPicker() knows the second. So the answer
+       is recorded here and the showing is left to it — a locked column must
+       not explain an emptiness the client has not asked about yet. */
     var none = merchants.length === 0;
-    show(nodes.merchantEmpty, none);
+    nodes.merchantEmpty.dataset.empty = none ? "1" : "0";
     if (none) {
       nodes.merchantEmptyText.textContent = emptyText(EMPTY.merchant);
     }
@@ -848,6 +972,9 @@
     merchants.forEach(function (merchant) {
       var button = make("button", "choice");
       button.type = "button";
+      // What markChosen() compares against, so re-rendering the list keeps the
+      // mark on the right row without anybody tracking the old node.
+      button.setAttribute("data-key", String(merchant.id));
 
       var body = make("div", "choice__body");
       body.appendChild(make("span", "choice__title", merchant.name));
@@ -860,11 +987,10 @@
 
       button.addEventListener("click", function () {
         state.merchant = merchant;
-        // Both, because the methods this merchant covers are about to replace
-        // the list the old choice came from.
-        state.method = null;
-        state.wallet = null;
-        advance("merchant");
+        // The method column and the wallet, because the methods this merchant
+        // covers are about to replace the list the old choice came from.
+        resetAfter("merchant");
+        renderPicker();
         loadOptions();
       });
 
@@ -878,26 +1004,26 @@
     clear(nodes.methodChoices);
 
     var none = methods.length === 0;
-    show(nodes.methodEmpty, none);
+    nodes.methodEmpty.dataset.empty = none ? "1" : "0";
     if (none) {
       // Two different emptinesses with two different answers: nothing has been
       // chosen yet, or what was chosen covers nothing. Only the second is the
-      // merchant's fault, and only the first is fixed by going back a screen.
+      // merchant's fault. The first is now unreachable — the column is locked
+      // and renders no list until a merchant is chosen — but it stays worded,
+      // because an emptiness that arrives out of order should still say why.
       nodes.methodEmptyText.textContent = state.merchant
         ? emptyText(EMPTY.method)
         : EMPTY.methodNoMerchant;
-      nodes.methodEmptyBack.textContent = state.merchant
-        ? EMPTY.methodAction
-        : EMPTY.methodNoMerchantAction;
     }
 
     methods.forEach(function (method) {
       var button = make("button", "choice");
       button.type = "button";
+      button.setAttribute("data-key", String(method.code));
 
       /* The icon is identification and nothing more: small, beside the name,
-         the size of a favicon. It is deliberately not the picture on this
-         screen — that is the wallet's QR on screen 4, which is a thing to point
+         the size of a favicon. It is deliberately not the picture in this row —
+         that is the wallet's QR in the details below, which is a thing to point
          a camera at. Two pictures of similar weight is exactly how a client
          ends up scanning a logo. */
       button.appendChild(methodIcon(method));
@@ -908,8 +1034,8 @@
 
       button.addEventListener("click", function () {
         state.method = method;
-        state.wallet = null;
-        advance("method");
+        resetAfter("method");
+        renderPicker();
         loadOptions();
       });
 
@@ -941,45 +1067,20 @@
     return make("span", "choice__monogram", text);
   }
 
-  /* Both empty states offer the way out rather than only the explanation: the
-     fix for either is exactly one screen back, and a client who has to find
-     the back control themselves is being asked to work it out. */
-  nodes.merchantEmptyBack.addEventListener("click", function () {
-    retreat("type");
-  });
+  /* The two empty states used to carry a button back to the screen that could
+     fix them. There is no screen to go back to — the column that fixes either
+     is in the same row, a few centimetres away — so they carry the explanation
+     alone now. The chips that stood at the top of the details block are gone
+     for the same reason: they existed to show what had been chosen on screens
+     the client could no longer see, and to offer a way back to them. The row
+     above does both, permanently, and is where the choosing happens anyway. */
 
-  nodes.methodEmptyBack.addEventListener("click", function () {
-    retreat("merchant");
-    loadOptions();
-  });
+  /* --- the details -------------------------------------------------------- */
 
-  /* --- screen 4: details -------------------------------------------------- */
-
-  function renderChips() {
-    clear(nodes.chips);
-    // In the order they were chosen, so tapping one to change it lands where
-    // the client expects rather than a screen away from it.
-    if (state.merchant) {
-      nodes.chips.appendChild(chip(state.merchant.name, "merchant"));
-    }
-    if (state.method) {
-      nodes.chips.appendChild(chip(state.method.caption, "method"));
-    }
-  }
-
-  function chip(text, target) {
-    var button = make("button", "chip");
-    button.type = "button";
-    button.appendChild(make("span", null, text));
-    button.appendChild(make("span", "chip__edit", "تغيير"));
-    button.addEventListener("click", function () { go(target); });
-    return button;
-  }
-
-  /* Screen 4 in whichever shape this direction takes, plus the two leads that
-     name the transfer's direction. Called on every options payload rather than
-     once at the switch, because the payload is also what re-arrives when the
-     client walks back and forth through the wizard. */
+  /* The details in whichever shape this direction takes, plus the two leads
+     that name the transfer's direction. Called on every options payload rather
+     than once at the switch, because the payload is also what re-arrives when
+     the client changes an answer in the row. */
   function renderDirection() {
     var text = words();
 
@@ -993,7 +1094,7 @@
     show(nodes.destinationField, Boolean(state.needs.destination));
     show(nodes.proofField, state.needs.proof !== false);
 
-    if (state.screen === "details") { nodes.title.textContent = text.title; }
+    nodes.detailsTitle.textContent = text.title;
 
     var digits = config.destinationDigits || {};
     nodes.destinationHint.textContent =
@@ -1032,7 +1133,6 @@
   });
 
   function renderWallet() {
-    renderChips();
     renderWalletTarget();
     nodes.walletOwner.textContent = state.wallet && state.wallet.label
       ? state.wallet.label
@@ -1266,9 +1366,9 @@
     }
 
     var needsWallet = state.needs.wallet !== false;
-    if (!state.method || !state.merchant || !state.rate ||
+    if (!state.type || !state.method || !state.merchant || !state.rate ||
         (needsWallet && !state.wallet)) {
-      toast("أكمل الخطوات السابقة أولًا.");
+      toast("أكمل اختياراتك في الأعلى أولًا.");
       return;
     }
 
@@ -1800,8 +1900,11 @@
     if (!app.hidden) { return; }
 
     app.hidden = false;
-    go("type", { replace: true, reset: true });
+    go("compose", { replace: true, reset: true });
     show(nodes.back, false);
+    // Before the first catalogue call, so the row paints locked-and-explained
+    // rather than blank for as long as the network takes.
+    renderPicker();
     nodes.messageCount.textContent = "0 / " + config.messageMaxChars;
     loadOptions();
     loadHistory();

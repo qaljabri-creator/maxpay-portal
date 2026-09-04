@@ -2,10 +2,21 @@
 {% comment %}
 The client request flow (spec §7) — build-order step 6.
 
-Six screens, one document. They cannot be six pages: the portal is framed
+Three screens, one document. They cannot be three pages: the portal is framed
 cross-site, Django's CSRF cookie never arrives, and the per-session token that
 stands in for it can only travel in a header — which only `fetch` can set. See
 apps/portal/flow_views.py.
+
+**Filing a request is one screen.** It was four — direction, merchant, method,
+details, walked in order — and the walk was the problem: a client could not see
+what they had already chosen without going back through it, and changing the
+first answer meant three taps to return to where they were. The three choices
+now sit in a row with the details beneath them, so the whole request is one
+view and any answer is one tap from being changed.
+
+What remains outside it is the two screens that are outcomes rather than steps:
+the confirmation, and the request view with its thread. Plus the closed notice,
+which replaces the compose screen outside business hours (spec §7).
 
 Every screen is present in the DOM from the start and shown by `data-screen` on
 the shell, so moving between them costs no request and no reflow of the frame.
@@ -16,15 +27,24 @@ script stays free of layout.
 No inline script, no inline style, no inline handler — the CSP shipped with this
 page is `default-src 'self'` and each of those would need it relaxed.
 
-Step 10 added the withdrawal direction to the same six screens rather than a
-second set of them: screens 1 to 3 are identical, and screen 4 swaps the
+Step 10 added the withdrawal direction to the same screens rather than a second
+set of them: the three choices are identical, and the details swap the
 wallet-to-pay-into block and the proof upload for a destination account. Both
 halves are in the DOM here and the script shows whichever the `needs` object in
 the options payload says this direction uses — the server decides, so the form
 can never collect a field the submission would refuse.
 {% endcomment %}
 
-<div class="app" id="app" data-screen="type" hidden>
+{% comment %}The step counter and the progress bar that used to sit here are
+gone with the wizard that needed them. Both answered "how far through am I",
+which is a question a client can now answer by looking: the three choices are
+on screen at once and the answered ones are marked. A bar reading 1/1 is not a
+smaller version of that answer, it is a decoration.
+
+The back control stays. It is not the wizard's — it belongs to the two screens
+that still sit outside the compose screen, the confirmation and the request
+view.{% endcomment %}
+<div class="app" id="app" data-screen="compose" hidden>
 
   <header class="app__bar">
     <button type="button" class="app__back" id="app-back" hidden>
@@ -34,96 +54,130 @@ can never collect a field the submission would refuse.
       </svg>
       <span>{% trans "رجوع" %}</span>
     </button>
-    <h1 class="app__title" id="app-title">{% trans "نوع الطلب" %}</h1>
-    <span class="app__step" id="app-step" hidden></span>
+    <h1 class="app__title" id="app-title">{% trans "طلب جديد" %}</h1>
   </header>
-
-  <div class="app__progress" id="app-progress" hidden>
-    <span class="app__progress-bar" id="app-progress-bar"></span>
-  </div>
 
   <main class="app__body">
 
-    {# ---------------------------------------------------------------- 1 #}
-    <section class="screen" data-screen="type" aria-labelledby="app-title">
-      <p class="screen__lead">{% trans "ماذا تريد أن تفعل؟" %}</p>
+    {% comment %}One screen, not four.
 
-      <div class="choices" id="type-choices">
-        <button type="button" class="choice choice--hero" data-type="deposit">
-          <span class="choice__icon" aria-hidden="true">
-            <svg class="icon icon--lg" viewBox="0 0 24 24">
-              <path d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                    fill="none" stroke="currentColor" stroke-width="1.7"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </span>
-          <span class="choice__body">
-            <span class="choice__title">{% trans "إيداع" %}</span>
-            <span class="choice__note">{% trans "أضِف رصيدًا إلى حسابك" %}</span>
-          </span>
-        </button>
+    The three choices a request is made of — direction, merchant, method — sit
+    in a row across the top, all three on screen from the first paint, and the
+    details appear underneath the moment the third is answered. It replaced a
+    four-step wizard: the client could not see what they had chosen without
+    walking back through it, and could not tell how much was left to answer.
 
-        <button type="button" class="choice choice--hero" data-type="withdrawal">
-          <span class="choice__icon" aria-hidden="true">
-            <svg class="icon icon--lg" viewBox="0 0 24 24">
-              <path d="M12 14V3m0 0L8 7m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                    fill="none" stroke="currentColor" stroke-width="1.7"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </span>
-          <span class="choice__body">
-            <span class="choice__title">{% trans "سحب" %}</span>
-            <span class="choice__note">{% trans "اسحب رصيدًا من حسابك" %}</span>
-          </span>
-        </button>
+    The row is a chain, not three independent controls. Each column unlocks
+    when the one before it is answered, and changing an earlier answer clears
+    every later one — the same dependency the wizard expressed by ordering, now
+    expressed by state. `CHAIN` in static/js/flow.js is the single declaration
+    of that order; nothing here restates it.
+
+    Filtering is untouched. Which merchants take this direction and which
+    methods that merchant covers are still the server's answers, arriving in
+    the same options payload they always did.{% endcomment %}
+    <section class="screen" data-screen="compose" aria-labelledby="app-title">
+
+      <div class="picker" id="picker">
+
+        {# --------------------------------------------------------- type #}
+        <div class="picker__col" id="pick-type">
+          <h2 class="picker__title">{% trans "نوع الطلب" %}</h2>
+          <p class="picker__lead">{% trans "ماذا تريد أن تفعل؟" %}</p>
+
+          <div class="choices choices--pick" id="type-choices">
+            <button type="button" class="choice" data-type="deposit" data-key="deposit" aria-pressed="false">
+              <span class="choice__icon" aria-hidden="true">
+                <svg class="icon icon--lg" viewBox="0 0 24 24">
+                  <path d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                        fill="none" stroke="currentColor" stroke-width="1.7"
+                        stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="choice__body">
+                <span class="choice__title">{% trans "إيداع" %}</span>
+                <span class="choice__note">{% trans "أضِف رصيدًا إلى حسابك" %}</span>
+              </span>
+            </button>
+
+            <button type="button" class="choice" data-type="withdrawal" data-key="withdrawal" aria-pressed="false">
+              <span class="choice__icon" aria-hidden="true">
+                <svg class="icon icon--lg" viewBox="0 0 24 24">
+                  <path d="M12 14V3m0 0L8 7m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                        fill="none" stroke="currentColor" stroke-width="1.7"
+                        stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="choice__body">
+                <span class="choice__title">{% trans "سحب" %}</span>
+                <span class="choice__note">{% trans "اسحب رصيدًا من حسابك" %}</span>
+              </span>
+            </button>
+          </div>
+
+          {% comment %}Every column carries one of these. A list that came back
+          empty is a fact the client is owed a reason for; a bordered box with
+          nothing in it is the screen saying "something went wrong" in a way
+          nobody can act on. The text is written from JS because the reason
+          depends on the direction and on what has been answered so far.
+          {% endcomment %}
+          <div class="empty" id="type-empty" hidden>
+            <p class="empty__text" id="type-empty-text"></p>
+          </div>
+        </div>
+
+        {% comment %}The merchant comes before the method: the client settles
+        who they are handing money to first, and only then sees what that
+        merchant covers.{% endcomment %}
+        {# ----------------------------------------------------- merchant #}
+        <div class="picker__col" id="pick-merchant">
+          <h2 class="picker__title">{% trans "التاجر" %}</h2>
+          <p class="picker__lead" id="merchant-lead">{% trans "اختر التاجر الذي ستحوّل إليه." %}</p>
+
+          {% comment %}A locked column says what it is waiting for rather than
+          sitting blank. Blank reads as broken; a sentence reads as a queue.
+          {% endcomment %}
+          <p class="picker__wait" id="merchant-wait" hidden>{% trans "اختر نوع الطلب أولًا." %}</p>
+          <div class="choices choices--pick" id="merchant-choices"></div>
+          <div class="empty" id="merchant-empty" hidden>
+            <p class="empty__text" id="merchant-empty-text"></p>
+          </div>
+        </div>
+
+        {# ------------------------------------------------------- method #}
+        <div class="picker__col" id="pick-method">
+          <h2 class="picker__title">{% trans "طريقة الدفع" %}</h2>
+          <p class="picker__lead" id="method-lead">{% trans "اختر الطريقة التي ستحوّل بها من طرق هذا التاجر." %}</p>
+
+          <p class="picker__wait" id="method-wait" hidden>{% trans "اختر التاجر أولًا." %}</p>
+          <div class="choices choices--pick" id="method-choices"></div>
+          <div class="empty" id="method-empty" hidden>
+            <p class="empty__text" id="method-empty-text"></p>
+          </div>
+        </div>
+
       </div>
 
-      {% comment %}Every choice screen carries one of these. A list that came
-      back empty is a fact the client is owed a reason for; a bordered box with
-      nothing in it is the screen saying "something went wrong" in a way nobody
-      can act on. The text is written from JS because the reason depends on the
-      direction and on what has been chosen so far.{% endcomment %}
-      <div class="empty" id="type-empty" hidden>
-        <p class="empty__text" id="type-empty-text"></p>
-      </div>
+      {% comment %}The details, unchanged from the screen they used to be. They
+      appear directly under the row once all three answers are in, and are
+      hidden again the moment an earlier one changes — a form quoting a rate
+      and a wallet that belonged to a merchant the client has just swapped is a
+      form describing a request nobody is making.
 
-      <section class="history" id="history" hidden>
-        <h2 class="history__title">{% trans "طلباتك الأخيرة" %}</h2>
-        <ul class="history__list" id="history-list"></ul>
-      </section>
-    </section>
+      `.details[hidden]` is a real rule in static/css/flow.css, not a reliance
+      on the user agent's: this block sets a display of its own, and an author
+      rule beats the UA's `[hidden] { display: none }` whatever its
+      specificity. The same trap took `.field` and put the withdrawal proof
+      upload back on screen.{% endcomment %}
+      <div class="details" id="details" hidden>
 
-    {% comment %}The merchant comes before the method: the client settles who
-    they are handing money to first, and only then sees what that merchant
-    covers.{% endcomment %}
-    {# ---------------------------------------------------------------- 2 #}
-    <section class="screen" data-screen="merchant">
-      <p class="screen__lead" id="merchant-lead">{% trans "اختر التاجر الذي ستحوّل إليه." %}</p>
-      <div class="choices" id="merchant-choices"></div>
-      <div class="empty" id="merchant-empty" hidden>
-        <p class="empty__text" id="merchant-empty-text"></p>
-        <button type="button" class="empty__action" id="merchant-empty-back">
-          {% trans "ارجع واختر نوعًا آخر" %}
-        </button>
-      </div>
-    </section>
-
-    {# ---------------------------------------------------------------- 3 #}
-    <section class="screen" data-screen="method">
-      <p class="screen__lead" id="method-lead">{% trans "اختر الطريقة التي ستحوّل بها من طرق هذا التاجر." %}</p>
-      <div class="choices" id="method-choices"></div>
-      <div class="empty" id="method-empty" hidden>
-        <p class="empty__text" id="method-empty-text"></p>
-        <button type="button" class="empty__action" id="method-empty-back">
-          {% trans "اختر تاجرًا آخر" %}
-        </button>
-      </div>
-    </section>
-
-    {# ---------------------------------------------------------------- 4 #}
-    <section class="screen" data-screen="details">
-
-      <div class="chips" id="details-chips"></div>
+      {% comment %}The heading the app bar used to carry while the details were
+      a screen of their own. It names the direction — «تفاصيل الإيداع» or
+      «تفاصيل السحب» — and it earns its place here rather than in the bar,
+      because the bar now titles a screen that holds all three choices *and*
+      this block. Written from WORDING in static/js/flow.js, which is where
+      every string the two directions do not share already lives.{% endcomment %}
+      <h2 class="details__title" id="details-title"></h2>
 
       {% comment %}Two ways to be told where to pay, and they are kept visibly
       apart. A wallet may carry a number, a QR, or both — some rails (Super QI)
@@ -260,17 +314,33 @@ can never collect a field the submission would refuse.
           <span class="spinner" aria-hidden="true"></span>
         </button>
       </form>
+      </div>
+
+      {% comment %}The client's own recent requests. It lived on screen 1 of
+      the wizard, which was the only screen guaranteed to be seen; here it sits
+      under the whole compose screen, where it is out of the way of the choices
+      and still one glance from "did I already file this?".
+
+      The closed notice keeps its own copy for the same reason it always did:
+      it replaces this screen, and a client who cannot file anything tonight is
+      exactly the one who wants to look at what they filed this morning.
+      {% endcomment %}
+      <section class="history" id="history" hidden>
+        <h2 class="history__title">{% trans "طلباتك الأخيرة" %}</h2>
+        <ul class="history__list" id="history-list"></ul>
+      </section>
+
     </section>
 
     {# ------------------------------------------------------------ closed #}
     {% comment %}Build-order step 11. Spec §7: outside business hours the
     submission screens are replaced by this notice and a live countdown to
-    opening. It is a replacement, not an overlay: the wizard screens are
+    opening. It is a replacement, not an overlay: the compose screen is
     unreachable while it is up, and the server refuses a submission
     independently, so a client who gets past the screen still gets nowhere.
 
-    The request history is repeated here on purpose. It lives on screen 1,
-    which is one of the screens being replaced, and a client who cannot file
+    The request history is repeated here on purpose. It lives on the compose
+    screen, which is the screen being replaced, and a client who cannot file
     anything tonight is exactly the client who wants to check on what they
     filed this morning.{% endcomment %}
     <section class="screen screen--centred" data-screen="closed">

@@ -12,20 +12,25 @@
    colour means something:
 
      fill   the action the client is here to take, and nothing else. One
-            filled element per screen. On screen 4 that is the copy button;
+            filled element per screen. In the details that is the copy button;
             below the fold it is submit.
      text   a value the client has to read or check: a wallet number, a
             reference, the countdown, the running total.
      edge   where the eye must land first, at 34% so it frames rather than
-            shouts: the wallet block, the destination read-back.
+            shouts: the wallet block, the destination read-back, and the
+            answered column in the picker row.
 
    Everything else is the ground, a hairline, and three greys. Nothing is
    tinted just to look designed.
 
    Mobile first, and meant that way: the frame is a column on a phone, and
-   every screen is one thumb-reachable stack. The media queries only relax
-   spacing once there is room; nothing changes shape. Every control clears
-   `--tap`, so no target on this surface is smaller than a fingertip.
+   every screen is one thumb-reachable stack. The picker row is the one place
+   the shape changes with width — below 46rem it is a column, one choice above
+   the next, because three legible columns do not fit a phone and squeezing
+   them until the captions wrap is not a smaller version of the same design.
+   Every other media query only relaxes spacing once there is room. Every
+   control clears `--tap`, so no target on this surface is smaller than a
+   fingertip.
 
    RTL is the document direction, not a modifier. Anything that must stay
    left-to-right — a wallet number, a reference, a money figure — carries
@@ -33,9 +38,24 @@
    reordered by the bidi algorithm mid-number.
    ========================================================================= */
 
-/* The flow needs more room than the handshake card it replaces. */
-#embed-stage[data-state="ready"] { max-width: 34rem; }
+/* The flow needs more room than the handshake card it replaces — and the
+   compose screen needs more again, because three columns of choices do not fit
+   in a width chosen for one.
+
+   The ceiling moved to `.app` rather than staying on the stage so it can differ
+   per screen. Everything that is not the compose screen keeps the 34rem it has
+   always had: the confirmation is a reference and two buttons, and the request
+   view is a timeline and a thread, both of which read worse the wider they get.
+   Only the row is allowed the extra room, and only while it is on screen.
+
+   Plain attribute selectors, deliberately. `:has()` on the stage would express
+   the same thing and would be the more obvious reach, but this needs no
+   fallback story at all. */
+#embed-stage[data-state="ready"] { max-width: 46rem; }
 #embed-stage[data-state="ready"] .card { display: none; }
+
+.app { max-width: 34rem; margin-inline: auto; }
+.app[data-screen="compose"] { max-width: 46rem; }
 
 /* body.embed centres its one child with `place-items: center`, which is right
    for a short card and wrong for a long screen: an item taller than the frame
@@ -105,38 +125,6 @@
 [dir="rtl"] .app__back .icon { transform: scaleX(1); }
 [dir="ltr"] .app__back .icon { transform: scaleX(-1); }
 
-.app__step {
-  min-width: var(--tap);
-  color: var(--ink-3);
-  font-size: .8rem;
-  font-weight: 600;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.app__step[hidden] { display: none; }
-
-.app__progress {
-  height: 2px;
-  margin-bottom: 1.1rem;
-  border-radius: 2px;
-  background: var(--line-2);
-  overflow: hidden;
-}
-.app__progress[hidden] { display: none; }
-
-.app__progress-bar {
-  display: block;
-  height: 100%;
-  width: 0;
-  border-radius: 2px;
-  background: var(--accent);
-  transition: width .28s ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app__progress-bar { transition: none; }
-}
-
 /* --- screens ------------------------------------------------------------ */
 
 .app__body {
@@ -150,22 +138,15 @@
   .app__body { padding: 1.6rem 1.5rem 1.75rem; }
 }
 
+/* Four of these used to be the wizard's steps. What is left is the compose
+   screen, the two outcomes, and the closed notice that replaces the first. */
 .screen { display: none; }
-.app[data-screen="type"]     .screen[data-screen="type"],
-.app[data-screen="method"]   .screen[data-screen="method"],
-.app[data-screen="merchant"] .screen[data-screen="merchant"],
-.app[data-screen="details"]  .screen[data-screen="details"],
-.app[data-screen="confirm"]  .screen[data-screen="confirm"],
-.app[data-screen="closed"]   .screen[data-screen="closed"],
-.app[data-screen="request"]  .screen[data-screen="request"] { display: block; }
+.app[data-screen="compose"] .screen[data-screen="compose"],
+.app[data-screen="confirm"] .screen[data-screen="confirm"],
+.app[data-screen="closed"]  .screen[data-screen="closed"],
+.app[data-screen="request"] .screen[data-screen="request"] { display: block; }
 
 .screen--centred { text-align: center; }
-
-.screen__lead {
-  margin: 0 0 1.1rem;
-  color: var(--ink-2);
-  font-size: .95rem;
-}
 
 .empty {
   margin: 1rem 0 0;
@@ -180,30 +161,10 @@
 
 .empty__text { margin: 0; line-height: 1.7; }
 
-/* A way out, not just an explanation. Every empty state a client can reach is
-   reachable *from* somewhere, and the fix is always one screen back. */
-.empty__action {
-  min-height: var(--tap);
-  margin-top: .8rem;
-  padding: .5rem 1.1rem;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: .9rem;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.empty__action:hover { border-color: var(--accent); }
-.empty__action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.empty__action[hidden] { display: none; }
-
-/* --- choice rows (screens 1 and 3) --------------------------------------
-   Deposit and withdrawal are the whole of screen 1, so they are sized to be
-   pressed without looking: full width, well past the tap target, and told
-   apart by their label first and their arrow second. */
+/* --- choice rows ---------------------------------------------------------
+   One row per option in each of the three picker columns. Full width of its
+   column, well past the tap target, and told apart by their label first and
+   their icon second. `.choices--pick` below tightens them for the row. */
 
 .choices { display: flex; flex-direction: column; gap: .6rem; }
 
@@ -228,8 +189,6 @@
 .choice:hover:not([disabled]) { border-color: var(--accent); }
 .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .choice[disabled] { opacity: .5; cursor: not-allowed; }
-
-.choice--hero { padding: 1.15rem 1rem; }
 
 /* Flat mark, no disc behind it. The arrow says up or down; a tinted circle
    round it says nothing.
@@ -273,29 +232,112 @@
   .choice { transition: none; }
 }
 
-/* --- chips (screen 4 breadcrumb) ---------------------------------------- */
+/* --- the picker row -------------------------------------------------------
+   The three choices a request is made of, side by side, with the details
+   underneath. It replaced a four-screen wizard and the breadcrumb chips that
+   existed to tell the client what they had chosen on screens they could no
+   longer see — the row shows that permanently, and is where the changing
+   happens, so both the chips and the progress bar went with it.
 
-.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.1rem; }
+   Mobile first, and that is not a fallback here: below 46rem the row *is* a
+   column, one choice above the next, which is the same order the wizard walked
+   and the only order that fits a phone. The grid only appears once there is
+   width for three legible columns. Column, then row — never a three-column
+   grid squeezed until the captions wrap. */
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: .4rem;
-  min-height: 2.25rem;
-  padding: .3rem .75rem;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  background: none;
-  color: var(--ink-2);
-  font: inherit;
-  font-size: .8rem;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+.picker { display: flex; flex-direction: column; gap: 1.1rem; }
+
+.picker__col {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  min-width: 0;   /* so a long merchant name shrinks the column instead of the row */
 }
 
-.chip:hover { border-color: var(--accent); color: var(--accent); }
-.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.chip__edit { color: var(--ink-3); font-size: .72rem; }
+/* Locked: the step before this one has not been answered. Dimmed, and the
+   column says what it is waiting for rather than sitting blank — see
+   `.picker__wait`. Nothing inside is rendered while it is locked, so there is
+   nothing to tab into and no `pointer-events` trick holding it shut. */
+.picker__col--locked .picker__title,
+.picker__col--locked .picker__lead { opacity: .45; }
+
+.picker__title {
+  margin: 0;
+  font-size: .82rem;
+  font-weight: 700;
+  letter-spacing: .01em;
+  color: var(--ink-2);
+}
+
+/* Answered. A rule under the heading rather than a tick beside it: three ticks
+   in a row read as a checklist to be completed, and this is a record of what
+   the request currently is. */
+.picker__col--done .picker__title {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: .3rem;
+}
+
+.picker__lead { margin: 0; color: var(--ink-3); font-size: .82rem; line-height: 1.6; }
+
+.picker__wait {
+  margin: 0;
+  padding: .85rem .9rem;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  font-size: .84rem;
+  line-height: 1.6;
+}
+.picker__wait[hidden] { display: none; }
+
+/* `.choices` sets `display: flex`, so it needs the companion rule or `hidden`
+   on a locked column's list does nothing at all — the trap that put the
+   withdrawal proof upload back on screen. Same reason as `.field[hidden]`. */
+.choices--pick { gap: .5rem; }
+.choices[hidden] { display: none; }
+
+/* The rows in this row are read at a glance and in threes, so they are tighter
+   than the full-width choices the wizard had, and the direction pair no longer
+   needs `--hero` sizing to fill a screen of its own. */
+.choices--pick .choice { padding: .7rem .8rem; }
+.choices--pick .choice__title { font-size: .95rem; }
+
+/* The current answer. Border and tint, not a tick: it has to be legible at a
+   glance across three columns, and it is the same visual weight in each. */
+.choice--chosen {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+@media (min-width: 46rem) {
+  .picker {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+}
+
+/* --- the details ----------------------------------------------------------
+   Shown only once all three columns are answered. `display` is set here, so
+   the `[hidden]` companion below is load-bearing rather than decorative: an
+   author rule beats the user agent's `[hidden] { display: none }` whatever its
+   specificity, and without it the details would sit under a half-empty row
+   quoting a rate for a request nobody is making. */
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  margin-top: 1.5rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--line);
+}
+.details[hidden] { display: none; }
+
+.details__title { margin: 0; font-size: 1.05rem; font-weight: 700; line-height: 1.5; }
 
 /* --- the wallet block (screen 4) ----------------------------------------
    The one thing on screen 4 the client came for. It gets the accent edge, the

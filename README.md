@@ -341,7 +341,7 @@ it on both sides of every edit — which identifier a payout was matched against
 and who moved it, is exactly the question an audit log is asked afterwards.
 
 It is not in `merchant_payload`. The client's merchant list is an explicit
-whitelist of `id`, `name` and `method_count`, so the field cannot reach screen 2
+whitelist of `id`, `name` and `method_count`, so the field cannot reach the merchant column
 by being added to the model.
 
 ### The B2CORE integration screen, and why it is read-only
@@ -429,7 +429,7 @@ inside the RTL page.
 Lives at `/portal/`, inside an iframe on B2CORE. Step 5 delivers the
 authentication half — the handshake, the verification, the session — step 6 the
 deposit flow it exists for, and step 10 the withdrawal flow beside it. Both
-directions use the same six screens and the same endpoints; the type is a
+directions use the same screens and the same endpoints; the type is a
 field, not a route.
 
 ```
@@ -576,33 +576,80 @@ outside an iframe for local work on the page itself.
 
 ## The client request flow
 
-Six screens (spec §7), and one page. They cannot be six pages: the portal is
+Three screens (spec §7), and one page. They cannot be three pages: the portal is
 framed cross-site, Django's CSRF cookie never arrives, and the per-session token
 that stands in for it can only travel in a header — which only `fetch` can set.
-So the wizard navigates in the browser and talks to JSON.
+So the flow navigates in the browser and talks to JSON.
 
 ```
-1  نوع الطلب        deposit or withdrawal — both live since step 10
-2  التاجر           merchants who can take this direction — with an active
-                    wallet on a deposit, any active merchant on a withdrawal
-3  طريقة الدفع      the methods *that merchant* covers, each with a small
-                    identifying icon beside its name
-4  التفاصيل         deposit:    wallet number + copy, or the QR to scan, amount in USD with a live
-                                IQD figure, proof upload, optional message
-                    withdrawal: destination card or wallet, amount in USD with a
-                                live IQD figure, optional message
-5  التأكيد          the reference, MP-xxxxx
-6  عرض الطلب        status timeline, attachments, message thread
+طلب جديد     the whole request, on one screen:
+
+             ┌─ نوع الطلب ──┬─ التاجر ─────┬─ طريقة الدفع ─┐
+             │ deposit or   │ merchants    │ the methods   │
+             │ withdrawal   │ who can take │ *that*        │
+             │              │ this         │ merchant      │
+             │              │ direction    │ covers        │
+             └──────────────┴──────────────┴───────────────┘
+                          ↓ once all three are answered
+             التفاصيل
+               deposit:    wallet number + copy, or the QR to scan,
+                           amount in USD with a live IQD figure,
+                           proof upload, optional message
+               withdrawal: destination card or wallet, amount in USD
+                           with a live IQD figure, optional message
+
+التأكيد      the reference, MP-xxxxx
+عرض الطلب    status timeline, attachments, message thread
 ```
 
-Screen 4 is the only one that differs, and *how* it differs is the server's
-answer, not the script's guess: every `/portal/options/` payload carries a
-`needs` object (`wallet`, `destination`, `proof`) and `flow.js` shows whichever
-half it names. A screen that collected a field the submission would refuse, or
-omitted one it requires, would need those two to disagree first.
+**It was a four-step wizard until 4 Sep 2026.** Type, merchant, method and
+details were four screens walked in order, with a back control, a step counter
+and a progress bar. The complaint was not speed. A client could not see what they
+had already chosen without walking back through it, and changing the first
+answer was three taps from wherever they were standing.
 
-Screen 1 also carries the client's last few requests, so a returning client can
-reach screen 6 without submitting anything.
+Now the three choices are a row across the top, all of them on screen from the
+first paint, and the details appear underneath the moment the third is answered.
+Any answer is one tap from being changed, and what changing it costs is visible
+before you do it, because the columns to its right are right there.
+
+**The row is a chain, and `CHAIN` in `flow.js` is the only place that says so.**
+Which column is unlocked, what an answer invalidates, and whether the details
+belong on screen are all derived from that one array. The wizard kept the order
+in an array *and* in the screen each handler named by hand; the two drifted, and
+screen 1 spent a while sending clients past the merchant into a method list that
+is empty by construction until a merchant is chosen. `advance()`, `retreat()`,
+`WIZARD` and the trail are gone — there is nowhere left to advance to.
+
+Changing an answer clears every answer after it and hides the details.
+A form quoting a rate and a wallet belonging to a merchant the client has just
+swapped is a form describing a request nobody is making.
+
+A **locked** column renders no list at all and says what it is waiting for.
+Not merely greyed: while no direction is chosen the merchants on hand are the
+*deposit* ones, because that is what `/portal/options/` defaults to, and showing
+them dimmed would be showing an answer to a question nobody has asked.
+
+**On a phone the row is a column** — one choice above the next, which is the
+same order the wizard walked. Written that way round in the stylesheet: the
+three-column grid is what appears above 46rem, not what gets squeezed below it.
+
+The details are the only part that differs by direction, and *how* they differ
+is the server's answer, not the script's guess: every `/portal/options/` payload
+carries a `needs` object (`wallet`, `destination`, `proof`) and `flow.js` shows
+whichever half it names. A screen that collected a field the submission would
+refuse, or omitted one it requires, would need those two to disagree first.
+
+Underneath it all sits the client's last few requests, so a returning client can
+reach the request view without submitting anything.
+
+**Nothing behind the row moved.** The endpoints, the payloads, the filtering
+rules and the order the catalogue is asked in are exactly what they were — which
+is why `WalkTests` in `apps/portal/tests/test_navigation.py`, which drives the
+server through the same sequence, is unchanged. What was rewritten beside it is
+`PickerChainTests`, which used to assert the wizard's order and now asserts the
+chain's: declared once, derived from everywhere, three columns always in the DOM,
+and the details not on screen until every answer is in.
 
 ### The amount
 
@@ -641,7 +688,7 @@ decimal separator, thousands separators and pasted bidi marks all parse as the
 number they look like — `pricing.normalise_number` and its mirror in `flow.js`
 have to agree, or the preview and the charge diverge.
 
-### Nothing on screen 4 is trusted, and nothing is silently re-priced
+### Nothing in the details is trusted, and nothing is silently re-priced
 
 The submission carries the **ids** of the wallet and the rate the client was
 shown. Both are checked against what is in force at that moment:
@@ -667,9 +714,9 @@ have tests.
 
 The client settles **who** they are handing money to before **how**. That is the
 order the reassurance actually runs in: a name they recognise first, then what
-that name covers. Screen 2 is the merchant list and screen 3 is the methods
-*that merchant* covers, so a method is never offered by somebody who cannot
-serve it — which the other order could only guarantee one screen later.
+that name covers. The second column is the merchant list and the third is the
+methods *that merchant* covers, so a method is never offered by somebody who
+cannot serve it — which the other order could only guarantee one step later.
 
 It costs nothing at the back: `catalog.available_merchants(type)` and
 `catalog.available_methods(type, merchant)` narrow the same
@@ -677,47 +724,53 @@ It costs nothing at the back: `catalog.available_merchants(type)` and
 optional other half, because the submission endpoint has to check the *pair* and
 that question has no order at all.
 
-It cost something at the front, and the bill is worth reading. The order lived
-in two places — the `WIZARD` array and four hardcoded `go("...")` calls — and
-reversing it updated the array and three of the four. Screen 1 went on sending
-the client to `"method"` by name, over the top of the merchant screen, into a
-method list that is *correctly* empty until a merchant has been chosen. Every
-test passed: they check the steps one at a time, and none of them asked what the
-client is shown next.
+It cost something at the front, and the bill is worth reading, because it is the
+reason the order is now declared exactly once. It used to live in two places —
+the `WIZARD` array and four hardcoded `go("...")` calls — and reversing it
+updated the array and three of the four. Screen 1 went on sending the client to
+`"method"` by name, over the top of the merchant screen, into a method list that
+is *correctly* empty until a merchant has been chosen. Every test passed: they
+check the steps one at a time, and none of them asked what the client is shown
+next.
 
-So forward navigation no longer names its destination. `advance(from)` reads the
-array, every screen calls it, and `apps/portal/tests/test_navigation.py` asserts
-both the declared order and that no `go("merchant"|"method"|"details")` remains
-anywhere. Backward moves may still name a screen — a chip on screen 4 jumps
-straight to the one it stands for — but those go through `retreat()`, which
-rewinds the trail rather than pushing onto it, so the back control cannot end up
-bouncing between two screens.
+The wizard that made that mistake possible is gone (4 Sep 2026), and with it
+`advance()`, `retreat()`, `WIZARD` and the trail. What replaced them keeps the
+lesson rather than the machinery: `CHAIN` is the single declaration of the
+order, and unlocking, resetting and showing the details all read it.
+`PickerChainTests` in `apps/portal/tests/test_navigation.py` asserts the order,
+that each of those three derives from it rather than naming columns, that no
+`go("type"|"merchant"|"method"|"details")` survives anywhere, and that the dead
+machinery is actually gone rather than left lying about as a second way to
+express the same thing.
 
-### Every empty choice screen says why
+### Every empty column says why
 
-The blank box was the second half of that bug, and it would have been a bad
-screen even without it. A list that came back empty is a fact the client is owed
-a reason for; a bordered box with nothing in it is the portal saying "something
-went wrong" in a way nobody can act on.
+The blank box was the second half of that bug, and it would have been bad even
+without it. A list that came back empty is a fact the client is owed a reason
+for; a bordered box with nothing in it is the portal saying "something went
+wrong" in a way nobody can act on.
 
-All three choice screens now carry one, written from `flow.js` because the
-reason depends on the direction and on what has been chosen so far:
+All three columns carry one, written from `flow.js` because the reason depends
+on the direction and on what has been answered so far:
 
-| Screen | Empty because | What it says |
+| Column | Empty because | What it says |
 | --- | --- | --- |
-| 1 · type | no rate for this direction, or nobody offering it | that this direction is closed, and the other one may not be |
-| 2 · merchant | every merchant is stopped, or has no active wallet on a deposit | which of the two directions is affected, and to try later |
-| 3 · method | **no merchant chosen yet** | that no merchant has been chosen, and to go back one screen |
-| 3 · method | the chosen merchant covers nothing in this direction | to choose a different merchant |
+| نوع الطلب | no rate for this direction, or nobody offering it | that this direction is closed, and the other one may not be |
+| التاجر | every merchant is stopped, or has no active wallet on a deposit | which of the two directions is affected, and to try later |
+| طريقة الدفع | the chosen merchant covers nothing in this direction | to choose a different merchant |
 
-Two emptinesses on screen 3, with two different answers, because only the second
-is the merchant's fault and only the first is fixed by going back. The first is
-the state the reversal produced, and it is exactly the state a client could not
-have made sense of.
+A **locked** column is a different thing from an empty one and says something
+different: it renders no list at all and names what it is waiting for. That
+distinction is what retired the fourth row of this table. "No merchant chosen
+yet, so no methods" was the state the reversal produced and the one a client
+could not make sense of; it is now unreachable, because the column is locked
+until there is a merchant. The wording survives in `EMPTY.methodNoMerchant`
+anyway — an emptiness arriving out of order should still say why rather than
+render blank.
 
-Each one offers the way out and not only the explanation: the fix is always one
-screen back, and a client who has to find the back control themselves is being
-asked to work it out.
+The empty states used to carry a button back to the screen that could fix them.
+There is no screen to go back to: the column that fixes either is in the same
+row, a few centimetres away.
 
 ### The catalogue offers nothing that leads nowhere
 
@@ -816,7 +869,7 @@ Three deliberate choices worth knowing about:
 
 ## The withdrawal flow
 
-Build-order step 10. Not a second wizard — the same six screens, the same
+Build-order step 10. Not a second flow — the same screens, the same
 endpoints, the same submission — because a withdrawal and a deposit share their
 first three screens exactly. Four things genuinely differ, and everything in
 this section is one of them.
@@ -826,7 +879,7 @@ this section is one of them.
 A deposit needs somewhere to pay *into*, so the catalogue refuses to offer a
 merchant whose last wallet stood down. A withdrawal needs nothing of the sort:
 the merchant pays out. So a merchant with no active wallet still appears on a
-withdrawal's screen 2, `wallet_number_snapshot` stays empty, and a wallet
+withdrawal's merchant column, `wallet_number_snapshot` stays empty, and a wallet
 sitting at its **daily cap** does not block one — the cap governs money paid
 into that wallet, and this is not that. `catalog.requires_wallet` derives the
 whole difference from the request type; nothing downstream re-decides it.
@@ -851,7 +904,7 @@ There is no undo.
 
 That is a typo guard, not a validation. No checksum covers every Iraqi rail, and
 nothing in software can tell a valid account from the wrong person's. So the
-last guard is not in the code: screen 4 shows the **normalised digits back to
+last guard is not in the code: the details show the **normalised digits back to
 the client, grouped**, before they can submit. That is the final moment at which
 a wrong number is still free to fix. The resolver runs the destination *before*
 the amount for the same reason — the refusal that matters most is the one the
@@ -861,7 +914,7 @@ client should be sent back to first.
 
 Covered under [The amount](#the-amount): deducted from what a withdrawal client
 receives, added to what a deposit client transfers. `payloads.converted_iqd`
-undoes it with the matching sign, so the breakdown on screen 6 adds back up to
+undoes it with the matching sign, so the breakdown on the request view adds back up to
 the figure the client can see in their own bank app.
 
 ### The B2CORE debit
@@ -995,7 +1048,7 @@ role and permission gates — there is no operator to check them against — and
 audited as `system` with a null actor, because attributing it to the client
 would be a lie about who decided.
 
-It is **best effort**. The merchant was offerable when the wizard drew the
+It is **best effort**. The merchant was offerable when the row drew the
 screen and may not be by the time the submission lands: deactivated, method
 switched off, wallet retired. The refusal is swallowed, the deposit stays
 `submitted`, and it shows up as work waiting on Finance — which is what it now
@@ -1024,7 +1077,7 @@ and the client is never told about it (`payloads.py` has never disclosed
 ### Rejection is a message, not a field
 
 Spec §6: the reason is posted into the thread. So it is — as a real `Message`
-from the rejecting role, which the client reads on screen 6. A `rejection_reason`
+from the rejecting role, which the client reads on the request view. A `rejection_reason`
 column nobody renders would not be telling anyone anything.
 
 Every action also takes an optional **internal note**, posted with
@@ -1505,12 +1558,12 @@ second has not been replaced.
 
 A request already filed stays readable, and its thread stays writable — the
 conversation is gated on nothing (see *Message threads* above). Only the four
-wizard screens are replaced. The confirmation screen is not: a client who
+compose screen is replaced. The confirmation screen is not: a client who
 submitted at 20:59 and watched the desk close at 21:00 keeps the reference they
 were just given.
 
 The client's closed notice repeats their recent requests, because the list
-normally lives on screen 1, which is one of the screens being replaced — and a
+normally lives on the compose screen, which is the screen being replaced — and a
 client who cannot file anything tonight is exactly the one who wants to look at
 what they filed this morning.
 
@@ -1726,7 +1779,7 @@ The stylesheet carries that companion rule for twelve other components,
 including `.field__error` and `.field__review` — the two *children* of the class
 that was missing it.
 
-It was never specific to the proof upload. Screen 4 is one screen serving two
+It was never specific to the proof upload. The details are one block serving two
 directions (step 10) and the same defect showed `#destination-field`, the
 client's card number, on a deposit. One line fixes both.
 
@@ -1744,7 +1797,7 @@ client got wrong.
 The merchant's own proof upload at `pay` is untouched, which is what spec §6
 asks for.
 
-`ScreenFourHidesWhatItDoesNotCollectTests` holds the display half. No browser
+`HidingWhatIsNotCollectedTests` holds the display half. No browser
 runs in this suite, so it asserts the contract a browser would enforce: no
 element the flow hides by id may carry a class that sets a `display` without a
 `[hidden]` rule undoing it. `WithdrawalProofIsRefusedTests` holds the other
@@ -1753,7 +1806,7 @@ still requires and stores its own proof.
 
 ### The client's thread is live
 
-Screen 6 needed the refresh button pressed before a reply appeared. It now polls
+The request view needed the refresh button pressed before a reply appeared. It now polls
 on the same ten seconds spec §10 gives the panels, and follows the same three
 rules `static/js/panel.js` does — never touch what is being typed, stop when the
 tab is hidden, back off quietly on failure.
@@ -1800,7 +1853,7 @@ once.
 | | Payment method icon | Wallet QR |
 | --- | --- | --- |
 | What it is | a brand mark, identification only | a code to point a camera at |
-| Where it renders | 1.9rem beside the method's name on screen 3 | its own block on screen 4, up to 16rem, on a white plate |
+| Where it renders | 1.9rem beside the method's name in the method column | its own block in the details, up to 16rem, on a white plate |
 | Its heading | none; it sits inside the row | an explicit one, and it changes: *scan the QR* on its own, *or scan the QR instead of copying the number* beside a number |
 | Where it is uploaded | Payment methods | that merchant's wallet |
 | Its route | `portal:method_icon`, cached long | `portal:wallet_qr`, cached 300s, active wallets only |
@@ -1813,7 +1866,7 @@ each links to the other, because the mistake is symmetric — a QR uploaded as a
 method icon is unscannable, and a logo uploaded as a wallet's QR is handed to a
 client as something to scan.
 
-The two blocks on screen 4 are two blocks, never one block that changes meaning.
+The two blocks in the details are two blocks, never one that changes meaning.
 The account half keeps the copy button and hides when there is no number — a
 button that copies `···` is worse than no button. The QR half is separated by a
 rule rather than merely spaced, because a client with both in front of them is
@@ -2456,7 +2509,7 @@ end at the login and must never leave the site on the way, because an open
 redirect towards a login form points at the one page a user is primed to trust.
 
 Two routes bounce through another of ours before arriving: `home` sends a caller
-to whichever panel is theirs, and the wizard's `disable` view sends anyone
+to whichever panel is theirs, and the `disable` view sends anyone
 without a device to `LOGIN_REDIRECT_URL`. Both are chains, not leaks, and the
 test follows them to the end rather than judging the first hop.
 
@@ -2537,7 +2590,7 @@ neither is closed.
   refused at submission instead, that needs balance access first.
 - **A destination account is checked for shape, not for validity.** Digits, and
   a length band wide enough for every Iraqi rail. Nothing tells a valid account
-  from the wrong person's, which is why screen 4 reads the normalised number
+  from the wrong person's, which is why the details read the normalised number
   back to the client before they commit. If Finance wants per-method formats —
   an 11-digit wallet for ZainCash, 16 for a card — `PaymentMethod` would need to
   carry the rule, and a wrong rule refuses legitimate clients.
@@ -2585,15 +2638,23 @@ neither is closed.
   exactly that reason. Extending `panel.js` to the embed was deliberately not
   done: the portal is a different surface with a different session and a
   different CSP, and sharing a poller across them would couple the two.
-- **Nothing has been exercised in a browser.** The suite covers the whole
-  project through the Django test client — the queue, the filters, every
-  transition, the refusals, the identity gating, the signed URLs, the live
-  fragments and every route's door — but no browser has run a line of
-  `panel.js` or `flow.js`. Two things follow. Nobody has watched the six client
-  screens render inside a real B2CORE frame: first contact should confirm the
+- **`panel.js` has never run in a browser, and the client flow only has on
+  localhost.** The suite covers the whole project through the Django test
+  client — the queue, the filters, every transition, the refusals, the identity
+  gating, the signed URLs, the live fragments and every route's door — and none
+  of that runs a line of JavaScript.
+
+  `flow.js` was driven in Chrome against `seed_demo` data on 4 Sep 2026, with
+  the compose screen restructure: the row unlocking column by column, an earlier
+  answer resetting the later ones, the withdrawal hiding the proof upload
+  (`display: none` confirmed on the live node, which is how the `.field[hidden]`
+  defect was closed for good), a request submitted end to end to its reference,
+  and the row collapsing to one column at 400px. No console errors.
+
+  What that does **not** cover is the host. Nobody has watched these screens
+  inside a real B2CORE frame, and three things depend on it specifically: the
   copy button (the host may not grant `clipboard-write`), the frame's height on
-  a long request view, and that `inputmode="numeric"` gets a numeric keypad
-  inside the host's frame. And the poller's own behaviour — the visibility
-  pause, the backoff, the fragment swap — is asserted on the server side only;
-  what the endpoints return is tested, that the script does the right thing
-  with it is not.
+  a long request view, and whether `inputmode="numeric"` gets a numeric keypad
+  there. And `panel.js` — the poller's visibility pause, its backoff, its
+  fragment swap — is still asserted on the server side only: what the endpoints
+  return is tested, that the script does the right thing with it is not.

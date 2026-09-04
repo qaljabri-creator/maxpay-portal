@@ -571,10 +571,10 @@ class WithdrawalProofIsRefusedTests(WithdrawalTestCase):
         self.assertEqual(Request.objects.get().attachments.count(), 1)
 
 
-class ScreenFourHidesWhatItDoesNotCollectTests(FlowTestCase):
-    """Neither half of screen 4 can be shown by the direction that has no use for it.
+class HidingWhatIsNotCollectedTests(FlowTestCase):
+    """Nothing the flow hides can be left on screen by a stylesheet rule.
 
-    Step 10 made screen 4 one screen serving two directions: the server's
+    Step 10 made the details one block serving two directions: the server's
     ``needs`` object says which half applies, and ``static/js/flow.js`` hides the
     other with the ``hidden`` attribute. That is the whole display mechanism, and
     it was silently inert.
@@ -585,19 +585,26 @@ class ScreenFourHidesWhatItDoesNotCollectTests(FlowTestCase):
     a withdrawal showed the proof upload (item 1.1) and a deposit showed the
     destination account, both regardless of what the server said.
 
+    The restructure of 4 Sep 2026 put a third element on the same mechanism: the
+    details block itself, hidden until all three choices in the row are
+    answered. Same trap, one more thing that would have been silently on screen.
+
     No browser runs in this suite, so what is asserted is the contract the
     browser would enforce: every element the flow hides by id must belong to no
     class that sets a ``display`` without a ``[hidden]`` companion to undo it.
     A stylesheet edit that reintroduces the defect fails here.
     """
 
-    #: The ids ``renderDirection()`` in static/js/flow.js toggles, and the
-    #: direction each one is hidden *for*. Both halves, because the defect was
-    #: never specific to the proof field — it just happened to be the half
-    #: somebody noticed.
+    #: The ids the flow toggles, and what each one is hidden *for*. All of them,
+    #: because the defect was never specific to the proof field — that just
+    #: happened to be the one somebody noticed.
     HIDEABLE_IDS = {
         "proof-field": "withdrawal",
         "destination-field": "deposit",
+        # Not a direction's half but the block holding both, hidden until all
+        # three choices in the row are answered. Same class of defect, same
+        # guard: it sets a display of its own.
+        "details": "an unanswered row",
     }
 
     @classmethod
