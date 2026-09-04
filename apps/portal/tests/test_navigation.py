@@ -173,13 +173,122 @@ class PickerChainTests(SimpleTestCase):
                 f"the {step} column ships hidden; all three are always on screen",
             )
 
-    def test_a_locked_column_offers_nothing_and_says_what_it_waits_for(self):
-        """Dimming a list of merchants while no direction is chosen would be
-        showing an answer to a question nobody asked — and those merchants are
-        the *deposit* ones, because that is what the server defaults to."""
+    def test_every_column_is_a_button_and_a_listbox(self):
+        """Built, not native, and the reason is the icon.
+
+        An `<option>` renders no markup, so a payment method's logo cannot sit
+        beside its name in a native list — and the logo is how a client
+        recognises the rail. What a `<select>` gave away for free is paid for
+        explicitly instead; the tests below are the receipt.
+        """
+        for step in EXPECTED_CHAIN:
+            self.assertIn(
+                f'class="dropdown__button" id="{step}-button"',
+                self.markup,
+                f"the {step} column has no dropdown button",
+            )
+            self.assertIn(
+                f'class="dropdown__list" id="{step}-list" role="listbox"',
+                self.markup,
+                f"the {step} column has no listbox",
+            )
+
+    def test_the_button_says_what_it_opens_and_what_it_is(self):
+        """`aria-labelledby` names it with the column's own label followed by
+        the current value, so it is announced as "the merchant, Ahmed Kadhim"
+        rather than as an unlabelled button."""
+        for step in EXPECTED_CHAIN:
+            match = re.search(
+                r'id="' + step + r'-button"(?P<rest>[\s\S]*?)>', self.markup
+            )
+            self.assertIsNotNone(match, step)
+            rest = match.group("rest")
+            self.assertIn('aria-haspopup="listbox"', rest, step)
+            self.assertIn('aria-expanded="false"', rest, step)
+            self.assertIn(f'aria-labelledby="{step}-label {step}-value"', rest, step)
+
+    def test_the_icon_is_inside_the_options_not_only_beside_the_control(self):
+        """The whole reason the native control was given up.
+
+        `fillOptions()` paints a mark into every row it builds, through the same
+        function the button uses, so the list and the button cannot end up
+        showing different things.
+        """
+        body = re.search(
+            r"function fillOptions\(step, rows\) \{(.*?)\n  \}", self.source, re.S
+        )
+        self.assertIsNotNone(body, "fillOptions() is gone")
+        self.assertIn("dropdown__icon", body.group(1))
+        self.assertIn("paintIcon(slot", body.group(1))
+
+        # And the method column is the one with an icon to paint.
+        icons = re.search(r"var ICON_OF = \{(.*?)\n  \};", self.source, re.S)
+        self.assertIsNotNone(icons, "flow.js no longer declares ICON_OF")
+        self.assertIn("method.icon", icons.group(1))
+
+    def test_the_keyboard_is_paid_for_rather_than_skipped(self):
+        """A native select brought all of this. A built one has to say it."""
+        for key in ('"Escape"', '"ArrowDown"', '"ArrowUp"', '"Home"', '"End"',
+                    '"Enter"', '"Tab"'):
+            self.assertIn(key, self.source, f"the listbox does not handle {key}")
+        self.assertIn("aria-activedescendant", self.source)
+        self.assertIn('setAttribute("aria-selected"', self.source)
+
+    def test_the_two_later_columns_ship_locked(self):
+        """Nothing is answered on the first paint, so nothing after the first
+        column may be usable before the script has run."""
         for step in ("merchant", "method"):
-            self.assertIn(f'id="{step}-wait"', self.markup, step)
-            self.assertIn(f'show(nodes.{step}Choices,', self.source, step)
+            match = re.search(
+                r'id="' + step + r'-button"(?P<rest>[\s\S]*?)>', self.markup
+            )
+            self.assertIsNotNone(match, step)
+            self.assertIn("disabled", match.group("rest"), step)
+
+    def test_a_locked_column_is_emptied_and_not_merely_disabled(self):
+        """The merchants sitting behind a locked merchant column are the
+        *deposit* ones — that is what the options endpoint defaults to, and it
+        hands them over on every payload regardless.
+
+        Disabling alone would leave them in the DOM, one removed attribute away
+        from being offered as the answer to a question nobody asked. So the
+        options go too.
+        """
+        body = re.search(
+            r"function renderPicker\(\) \{(.*?)\n  \}", self.source, re.S
+        )
+        self.assertIsNotNone(body, "renderPicker() is gone")
+        self.assertIn("box.button.disabled = !open", body.group(1))
+        self.assertIn("box.list.replaceChildren()", body.group(1))
+
+    def test_no_column_carries_a_line_of_explanation_under_its_label(self):
+        """The label names the column and the list shows what is in it. A
+        sentence saying "choose the merchant you will transfer to" under a
+        control already labelled "the merchant" is the screen reading itself
+        out loud — and three of them at three different lengths is what stopped
+        the columns lining up."""
+        self.assertNotIn("picker__lead", self.markup)
+        self.assertNotIn("picker__lead", self.styles)
+        for dead in ("merchantLead", "methodLead"):
+            self.assertNotIn(dead, self.source, f"{dead} outlived the line it wrote")
+
+    def test_the_three_columns_line_up_by_construction(self):
+        """Not by matching min-heights and hoping the text stays short.
+
+        `display: contents` on the column makes the label, the control and the
+        empty state direct grid items, so every label lands in row 1, every
+        control in row 2 and every empty state in row 3. The rows size to their
+        tallest member, which is what makes the three columns the same height
+        whatever any of them says.
+        """
+        grid = re.search(
+            # The picker's own breakpoint, not merely the first one in the file
+            # — `.app__body` has one too, and matching that instead is how this
+            # assertion would pass while saying nothing.
+            r"@media \(min-width: \d+rem\) \{\s*\.picker \{(.*?)\n\}", self.styles, re.S
+        )
+        self.assertIsNotNone(grid, "the picker's breakpoint is gone")
+        self.assertIn("grid-template-rows", grid.group(1))
+        self.assertRegex(grid.group(1), r"\.picker__col \{ display: contents; \}")
 
     def test_the_details_ship_hidden_and_are_shown_by_the_chain(self):
         match = re.search(r'<div class="details" id="details"(?P<rest>[^>]*)>', self.markup)
@@ -202,12 +311,14 @@ class PickerChainTests(SimpleTestCase):
             "static/css/flow.css needs `.details[hidden] { display: none; }`",
         )
 
-    def test_a_locked_column_s_list_can_actually_be_hidden(self):
-        """Same rule, same reason: `.choices` sets `display: flex`."""
+    def test_the_icon_slot_can_actually_be_hidden(self):
+        """`.dropdown__icon` sets `display: grid` — the same trap as `.field`,
+        on the slot that comes and goes with the answer. A merchant has no mark
+        to show, so its slot is hidden on every row of that column."""
         self.assertRegex(
             self.styles,
-            r"(?m)^\.choices\[hidden\]\s*\{[^}]*display\s*:\s*none",
-            "static/css/flow.css needs `.choices[hidden] { display: none; }`",
+            r"(?m)^\.dropdown__icon\[hidden\]\s*\{[^}]*display\s*:\s*none",
+            "static/css/flow.css needs `.dropdown__icon[hidden] { display: none; }`",
         )
 
     def test_the_row_collapses_to_one_column_on_a_phone(self):

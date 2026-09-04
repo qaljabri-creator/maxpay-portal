@@ -4,7 +4,8 @@
    Three screens, driven from the JSON in apps/portal/flow_views.py:
 
      compose   the whole request on one screen —
-               a row of three choices: type, merchant, method
+               a row of three dropdowns: type, merchant, method
+               (built, not native — the icon has to be in the list)
                and, beneath it once all three are answered, the details:
                  deposit:    wallet number + copy, amount with a live IQD
                              figure, proof upload, optional message
@@ -16,9 +17,9 @@
    **It was a four-step wizard and is not any more.** Type, merchant, method and
    details were four screens walked in order, and the order was the whole of the
    navigation: `WIZARD`, `advance()`, `retreat()`, a trail, a step counter and a
-   progress bar. All of it is gone. The three choices are a row across the top,
-   every one of them on screen from the first paint, and the details appear
-   underneath the moment the third is answered.
+   progress bar. All of it is gone. The three choices are a row of dropdowns
+   across the top, every one of them on screen from the first paint, and the
+   details appear underneath the moment the third is answered.
 
    What made the wizard worth replacing is not that it was slow. It is that a
    client could not see what they had already chosen, and changing the first
@@ -91,8 +92,6 @@
   var WORDING = {
     deposit: {
       title: "تفاصيل الإيداع",
-      merchantLead: "اختر التاجر الذي ستحوّل إليه.",
-      methodLead: "اختر الطريقة التي ستحوّل بها من طرق هذا التاجر.",
       commission: "العمولة",
       total: "الإجمالي المطلوب تحويله",
       submit: "إرسال الطلب",
@@ -100,8 +99,6 @@
     },
     withdrawal: {
       title: "تفاصيل السحب",
-      merchantLead: "اختر التاجر الذي سيحوّل لك المبلغ.",
-      methodLead: "اختر الطريقة التي تستلم بها من طرق هذا التاجر.",
       commission: "العمولة (تُخصم)",
       total: "المبلغ الذي ستستلمه",
       submit: "إرسال طلب السحب",
@@ -130,14 +127,94 @@
   /* How each answer identifies itself, because the three do not agree: a
      merchant carries an `id`, a method a `code`, and the direction is the
      string. Written once per step here and read by both halves that need it —
-     the renderer stamping `data-key` on a row, and markChosen() deciding which
-     row is the answer. Guessing the shape (`answer.id || answer`) would have
-     silently marked nothing in the method column, which has no `id`. */
+     fillOptions() stamping an option's `data-key`, rowFor() turning that
+     string back into the row the server sent, and markSelected() deciding
+     which row is the answer. Guessing the shape (`answer.id || answer`) would
+     have silently broken the method column, which has no `id`. */
   var KEY_OF = {
     type: function (value) { return String(value); },
     merchant: function (value) { return String(value.id); },
     method: function (value) { return String(value.code); }
   };
+
+  /* What a column's placeholder says. Two states, because a dropdown is asking
+     one of two different things: "pick one" when it can be used, and "answer
+     the one before me" when it cannot. Kept beside CHAIN rather than in the
+     template so the locked wording and the ready wording cannot drift apart,
+     and so the sentence lives where the rule that shows it lives.
+
+     `type.waiting` is null and never read: the first link in a chain has
+     nothing before it to wait for. */
+  var PLACEHOLDER = {
+    type: { ready: "اختر نوع الطلب", waiting: null },
+    merchant: { ready: "اختر التاجر", waiting: "اختر نوع الطلب أولًا" },
+    method: { ready: "اختر الطريقة", waiting: "اختر التاجر أولًا" }
+  };
+
+  /* How a row is written into an option, and what mark goes beside it. Three
+     tables rather than three renderers, so a column is described by what it
+     holds instead of by a function that knows how to draw it.
+
+     `ICON_OF` returns `{node}` for markup we own, `{src, text}` for a file
+     Finance uploaded (with the caption to fall back to if it will not load),
+     or null for a column with nothing to show. The payment method's is the one
+     that matters: a client recognises Zain Cash by its mark long before they
+     read the word, which is why an `<option>` was not enough and this list is
+     built by hand. */
+  var LABEL_OF = {
+    type: function (value) { return value === "withdrawal" ? "سحب" : "إيداع"; },
+    merchant: function (merchant) { return merchant.name; },
+    method: function (method) { return method.caption; }
+  };
+
+  var NOTE_OF = {
+    type: function (value) {
+      return value === "withdrawal" ? "اسحب رصيدًا من حسابك" : "أضِف رصيدًا إلى حسابك";
+    },
+    merchant: function (merchant) {
+      return merchant.method_count ? merchant.method_count + " طريقة دفع" : "";
+    },
+    method: null
+  };
+
+  var ICON_OF = {
+    type: function (value) { return { node: directionArrow(value) }; },
+    merchant: null,
+    method: function (method) { return { src: method.icon, text: method.caption }; }
+  };
+
+  /* The two directions, drawn rather than uploaded: they are ours and they are
+     the same on every install. An arrow into the account and one out of it —
+     the only pair in the flow where the mark carries the whole meaning and the
+     word merely confirms it. */
+  //: Both directions, for the moment before the first catalogue answer.
+  var DIRECTIONS = ["deposit", "withdrawal"];
+
+  var ARROW = {
+    deposit: "M12 3v11m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2",
+    withdrawal: "M12 14V3m0 0L8 7m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+  };
+
+  function directionArrow(value) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "icon");
+    svg.setAttribute("aria-hidden", "true");
+    var path = document.createElementNS(ns, "path");
+    path.setAttribute("d", ARROW[value] || ARROW.deposit);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.7");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+    return svg;
+  }
+
+  //: Which option the list opens on, and the keys that open it from the button.
+  var SELECTED_OPTION = '[aria-selected="true"]';
+  var OPENING_KEYS = ["ArrowDown", "Down", "ArrowUp", "Up", "Enter", " ", "Spacebar"];
 
   /* Spec §7: outside business hours every submission screen is replaced by the
      closed notice. There is one now. The confirmation and the request view are
@@ -221,6 +298,12 @@
        the wizard made, while the screen shows no direction as chosen. */
     type: null,
     method: null,
+    /* The last catalogue answer for each list. An <option> can only carry a
+       string, so the object the server sent has to be findable again when the
+       select changes — see rowFor(). Not a second source of truth: every
+       payload replaces these wholesale. */
+    merchants: [],
+    methods: [],
     merchant: null,
     wallet: null,
     rate: null,
@@ -246,6 +329,19 @@
 
   function el(id) { return document.getElementById(id); }
 
+  /* The five nodes a dropdown is made of, found by the one convention the
+     template follows: every id is the step name and a suffix. Written once so
+     the three columns cannot drift into three slightly different shapes. */
+  function dropdownAt(step) {
+    return {
+      root: el(step + "-dropdown"),
+      button: el(step + "-button"),
+      icon: el(step + "-icon"),
+      value: el(step + "-value"),
+      list: el(step + "-list")
+    };
+  }
+
   var nodes = {
     back: el("app-back"),
     title: el("app-title"),
@@ -256,30 +352,36 @@
     picker: el("picker"),
     details: el("details"),
     detailsTitle: el("details-title"),
+    /* All three keyed by the step names in CHAIN, so renderPicker() walks the
+       chain instead of naming columns one at a time. */
     columns: {
       type: el("pick-type"),
       merchant: el("pick-merchant"),
       method: el("pick-method")
     },
+    /* One record per column: the shell, the button that opens it, the slot the
+       chosen mark is drawn into, the span holding the chosen text, and the
+       listbox. Grouped rather than flattened so the dropdown code takes a step
+       name and gets everything it needs, and so adding a fourth column is a
+       row here rather than five more lookups. */
+    dropdowns: {
+      type: dropdownAt("type"),
+      merchant: dropdownAt("merchant"),
+      method: dropdownAt("method")
+    },
+    empties: {
+      type: el("type-empty"),
+      merchant: el("merchant-empty"),
+      method: el("method-empty")
+    },
 
-    typeChoices: el("type-choices"),
-    typeEmpty: el("type-empty"),
     typeEmptyText: el("type-empty-text"),
     history: el("history"),
     historyList: el("history-list"),
 
-    methodChoices: el("method-choices"),
-    methodEmpty: el("method-empty"),
     methodEmptyText: el("method-empty-text"),
-    methodWait: el("method-wait"),
-
-    merchantChoices: el("merchant-choices"),
-    merchantEmpty: el("merchant-empty"),
     merchantEmptyText: el("merchant-empty-text"),
-    merchantWait: el("merchant-wait"),
 
-    methodLead: el("method-lead"),
-    merchantLead: el("merchant-lead"),
 
     walletBlock: el("wallet-block"),
     walletLabel: el("wallet-label"),
@@ -672,32 +774,46 @@
     var unlocked = true;
 
     CHAIN.forEach(function (step) {
-      var column = nodes.columns[step];
       var open = unlocked;
+      var answer = answerAt(step);
+      var column = nodes.columns[step];
+      var box = nodes.dropdowns[step];
+
       if (column) {
         column.classList.toggle("picker__col--locked", !open);
-        column.classList.toggle("picker__col--done", Boolean(answerAt(step)));
+        column.classList.toggle("picker__col--done", Boolean(answer));
       }
-      unlocked = open && Boolean(answerAt(step));
+
+      if (box) {
+        /* Locked means `disabled` *and* emptied, not merely greyed.
+
+           The merchants sitting behind the merchant column while no direction
+           is chosen are the *deposit* ones — that is what the options endpoint
+           defaults to — and the catalogue hands them over on every payload
+           regardless. Disabling alone would leave them in the DOM, one removed
+           attribute from being reachable. So the list is dropped as well, and
+           refilled by fillOptions() when the column opens. */
+        box.button.disabled = !open;
+        if (!open) {
+          closeList(step);
+          box.list.replaceChildren();
+        }
+        // The button carries the sentence. A disabled control reading "choose a
+        // type first" is the whole explanation, said by the thing that is
+        // refusing, which is why no column has a separate waiting line.
+        setButtonTo(step, answer, open);
+        markSelected(step, answer);
+      }
+
+      // An emptiness is only worth explaining in a column the client can act
+      // in. A locked one is not empty, it is waiting.
+      var empty = nodes.empties[step];
+      if (empty) {
+        show(empty, open && empty.dataset.empty === "1");
+      }
+
+      unlocked = open && Boolean(answer);
     });
-
-    // A locked column says what it is waiting for and offers nothing. Not
-    // merely disabled: the merchants behind the merchant column while no
-    // direction is chosen are the *deposit* merchants, and showing them greyed
-    // would be showing an answer to a question nobody asked.
-    var typeChosen = Boolean(state.type);
-    show(nodes.merchantWait, !typeChosen);
-    show(nodes.merchantChoices, typeChosen);
-    show(nodes.merchantEmpty, typeChosen && nodes.merchantEmpty.dataset.empty === "1");
-
-    var merchantChosen = Boolean(state.merchant);
-    show(nodes.methodWait, !merchantChosen);
-    show(nodes.methodChoices, merchantChosen);
-    show(nodes.methodEmpty, merchantChosen && nodes.methodEmpty.dataset.empty === "1");
-
-    markChosen(nodes.typeChoices, "type");
-    markChosen(nodes.merchantChoices, "merchant");
-    markChosen(nodes.methodChoices, "method");
 
     // `unlocked` has walked the whole chain by now, so it is true only when
     // every step is answered. That is exactly when the details describe a real
@@ -705,18 +821,254 @@
     show(nodes.details, unlocked);
   }
 
-  /* Which option in a column is the current answer. Written as a data
-     attribute at render time and compared here, so re-rendering a list does
-     not lose the mark and choosing does not have to hunt for the old one. */
-  function markChosen(container, step) {
-    var answer = answerAt(step);
-    var key = answer === null || answer === undefined ? null : KEY_OF[step](answer);
-    Array.prototype.forEach.call(container.children, function (button) {
-      var mine = key !== null && button.getAttribute("data-key") === key;
-      button.classList.toggle("choice--chosen", mine);
-      button.setAttribute("aria-pressed", mine ? "true" : "false");
+  /* --- the dropdown -------------------------------------------------------
+
+     A button and a listbox, built rather than native, because a payment
+     method's logo has to appear beside its name *inside the list* and an
+     <option> renders no markup. A client recognises the rail by its mark.
+
+     Everything a <select> gave away for free is paid for here instead. It is
+     written once and all three columns use it, so there is one implementation
+     of the keyboard and one of the ARIA — three copies is how one of them ends
+     up not closing on Escape. */
+
+  /* What the button shows: the chosen row, or the sentence for this state. */
+  function setButtonTo(step, answer, open) {
+    var box = nodes.dropdowns[step];
+    box.value.textContent = answer
+      ? LABEL_OF[step](answer)
+      : (open ? PLACEHOLDER[step].ready : PLACEHOLDER[step].waiting);
+    box.value.classList.toggle("dropdown__value--empty", !answer);
+    paintIcon(box.icon, answer && ICON_OF[step] ? ICON_OF[step](answer) : null);
+  }
+
+  /* `aria-selected` belongs on the options, not on a class alone: it is what a
+     screen reader reads back, and the mark beside the row is only its visible
+     half. */
+  function markSelected(step, answer) {
+    var key = answer ? KEY_OF[step](answer) : null;
+    var list = nodes.dropdowns[step].list;
+    Array.prototype.forEach.call(list.children, function (option) {
+      var mine = option.getAttribute("data-key") === key;
+      option.setAttribute("aria-selected", mine ? "true" : "false");
+      option.classList.toggle("dropdown__option--chosen", mine);
     });
   }
+
+  /* Draw a mark into a slot: an uploaded image, a monogram, or nothing.
+     One function, because the button and every option in the list need the
+     same three cases and a second copy would drift. */
+  function paintIcon(slot, art) {
+    if (!slot) { return; }
+    if (!art) {
+      slot.replaceChildren();
+      show(slot, false);
+      return;
+    }
+    show(slot, true);
+    if (art.node) {
+      slot.replaceChildren(art.node);
+      return;
+    }
+    if (art.src) {
+      var image = document.createElement("img");
+      image.src = art.src;
+      image.alt = "";
+      image.loading = "lazy";
+      // Finance may have uploaded nothing, or the file may have gone. Either
+      // way a monogram beats a broken image.
+      image.addEventListener("error", function () {
+        slot.replaceChildren(monogram(art.text));
+      });
+      slot.replaceChildren(image);
+      return;
+    }
+    slot.replaceChildren(monogram(art.text));
+  }
+
+  function monogram(caption) {
+    return make("span", "dropdown__monogram", (caption || "؟").trim().charAt(0));
+  }
+
+  /* Replace a column's options. The rows arrive from the server already
+     filtered; nothing here decides what may be offered. */
+  function fillOptions(step, rows) {
+    var box = nodes.dropdowns[step];
+    if (!box) { return; }
+    box.list.replaceChildren();
+    rows.forEach(function (row, index) {
+      var option = make("li", "dropdown__option");
+      option.setAttribute("role", "option");
+      option.setAttribute("data-key", KEY_OF[step](row));
+      option.id = step + "-option-" + index;
+      option.setAttribute("aria-selected", "false");
+
+      var slot = make("span", "dropdown__icon");
+      option.appendChild(slot);
+      paintIcon(slot, ICON_OF[step] ? ICON_OF[step](row) : null);
+
+      // textContent, never innerHTML: a merchant's name and a method's caption
+      // both come from the database.
+      option.appendChild(make("span", "dropdown__label", LABEL_OF[step](row)));
+      if (NOTE_OF[step]) {
+        var note = NOTE_OF[step](row);
+        if (note) { option.appendChild(make("span", "dropdown__note", note)); }
+      }
+      box.list.appendChild(option);
+    });
+    markSelected(step, answerAt(step));
+  }
+
+  /* Which row a key stands for. The lists live in state because an option can
+     only carry a string, and the handlers need the object the server sent. */
+  function rowFor(step, key) {
+    var rows = step === "merchant" ? state.merchants : state.methods;
+    for (var i = 0; i < rows.length; i += 1) {
+      if (KEY_OF[step](rows[i]) === key) { return rows[i]; }
+    }
+    return null;
+  }
+
+  /* --- opening, closing, and the keyboard --------------------------------- */
+
+  var openStep = null;
+
+  function optionsOf(step) {
+    return Array.prototype.slice.call(nodes.dropdowns[step].list.children);
+  }
+
+  function activeOf(step) {
+    return nodes.dropdowns[step].list.querySelector(".dropdown__option--active");
+  }
+
+  function setActive(step, option) {
+    var box = nodes.dropdowns[step];
+    optionsOf(step).forEach(function (node) {
+      node.classList.toggle("dropdown__option--active", node === option);
+    });
+    if (option) {
+      box.list.setAttribute("aria-activedescendant", option.id);
+      // Keeps the active row in view when arrowing past the visible end of a
+      // long merchant list.
+      if (option.scrollIntoView) { option.scrollIntoView({ block: "nearest" }); }
+    } else {
+      box.list.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  function openList(step) {
+    var box = nodes.dropdowns[step];
+    if (!box || box.button.disabled || openStep === step) { return; }
+    // One at a time. Two open lists in a three-column row overlap each other,
+    // and only one of them can be the one being answered.
+    closeList(openStep);
+    openStep = step;
+    box.root.classList.add("dropdown--open");
+    box.button.setAttribute("aria-expanded", "true");
+    show(box.list, true);
+    var chosen = box.list.querySelector(SELECTED_OPTION);
+    setActive(step, chosen || box.list.firstElementChild);
+    box.list.focus({ preventScroll: true });
+  }
+
+  function closeList(step, options) {
+    if (!step) { return; }
+    var box = nodes.dropdowns[step];
+    if (!box) { return; }
+    box.root.classList.remove("dropdown--open");
+    box.button.setAttribute("aria-expanded", "false");
+    show(box.list, false);
+    setActive(step, null);
+    if (openStep === step) { openStep = null; }
+    // Focus goes back where it came from, but only when the client is still in
+    // the control — not when the list is being torn down by a reset.
+    if (options && options.focus) { box.button.focus({ preventScroll: true }); }
+  }
+
+  function chooseFrom(step, option) {
+    if (!option) { return; }
+    closeList(step, { focus: true });
+    CHOOSE[step](option.getAttribute("data-key"));
+  }
+
+  function moveActive(step, delta) {
+    var options = optionsOf(step);
+    if (!options.length) { return; }
+    var index = options.indexOf(activeOf(step));
+    var next = index === -1
+      ? (delta > 0 ? 0 : options.length - 1)
+      : Math.min(options.length - 1, Math.max(0, index + delta));
+    setActive(step, options[next]);
+  }
+
+  CHAIN.forEach(function (step) {
+    var box = nodes.dropdowns[step];
+    if (!box) { return; }
+
+    box.button.addEventListener("click", function () {
+      if (openStep === step) { closeList(step, { focus: true }); return; }
+      openList(step);
+    });
+
+    // Opening from the button with the keyboard, which is what a native select
+    // does and what the listbox pattern is expected to do.
+    box.button.addEventListener("keydown", function (event) {
+      if (OPENING_KEYS.indexOf(event.key) !== -1) {
+        event.preventDefault();
+        openList(step);
+      }
+    });
+
+    box.list.addEventListener("keydown", function (event) {
+      var key = event.key;
+      if (key === "Escape" || key === "Esc") {
+        event.preventDefault();
+        closeList(step, { focus: true });
+      } else if (key === "ArrowDown" || key === "Down") {
+        event.preventDefault();
+        moveActive(step, 1);
+      } else if (key === "ArrowUp" || key === "Up") {
+        event.preventDefault();
+        moveActive(step, -1);
+      } else if (key === "Home") {
+        event.preventDefault();
+        setActive(step, optionsOf(step)[0]);
+      } else if (key === "End") {
+        event.preventDefault();
+        var all = optionsOf(step);
+        setActive(step, all[all.length - 1]);
+      } else if (key === "Enter" || key === " " || key === "Spacebar") {
+        event.preventDefault();
+        chooseFrom(step, activeOf(step));
+      } else if (key === "Tab") {
+        // Let focus leave, but do not leave an orphaned list open behind it.
+        closeList(step);
+      }
+    });
+
+    box.list.addEventListener("click", function (event) {
+      var option = event.target.closest(".dropdown__option");
+      if (option) { chooseFrom(step, option); }
+    });
+
+    // Hover moves the active row, so the mouse and the keyboard agree about
+    // which one Enter would take.
+    box.list.addEventListener("mousemove", function (event) {
+      var option = event.target.closest(".dropdown__option");
+      if (option) { setActive(step, option); }
+    });
+
+    box.list.addEventListener("focusout", function (event) {
+      if (!box.root.contains(event.relatedTarget)) { closeList(step); }
+    });
+  });
+
+  // Anywhere else on the page closes it. `mousedown` rather than `click` so the
+  // list is gone before whatever was clicked reacts to being clicked.
+  document.addEventListener("mousedown", function (event) {
+    if (!openStep) { return; }
+    if (!nodes.dropdowns[openStep].root.contains(event.target)) { closeList(openStep); }
+  });
 
   /* `advance()` and `retreat()` are gone with the wizard. Forward movement was
      the thing they existed to get right — the order lived in an array *and* in
@@ -811,6 +1163,7 @@
     if (data.rate) { state.rate = data.rate; }
     if (data.needs) { state.needs = data.needs; }
     renderDirection();
+    renderTypes(data.types || []);
     renderTypeAvailability(data);
     renderMerchants(data.merchants || []);
     renderMethods(data.methods || []);
@@ -868,29 +1221,62 @@
     });
   }
 
-  /* --- screen 1: type + history ------------------------------------------ */
+  /* --- answering a column -------------------------------------------------
 
-  nodes.typeChoices.addEventListener("click", function (event) {
-    var button = event.target.closest("[data-type]");
-    if (!button || button.disabled) { return; }
-    state.type = button.getAttribute("data-type");
-    // Everything that depended on the direction, read off the chain rather
-    // than listed here — the two columns to its right, and the wallet.
-    resetAfter("type");
-    /* The rate is per direction (spec §5), and so is everything the details
-       collect. Dropping both here means a client who switches direction can
-       never submit against the other one's figures — loadOptions() fills them
-       in again for the direction they just chose. */
-    state.rate = null;
-    clearProof();
-    clearDestination();
-    renderDirection();
-    renderPicker();
-    loadOptions();
-  });
+     One entry per step, each taking the key the option carried: record the
+     answer, drop everything that depended on it, redraw the row, re-ask the
+     catalogue. What differs between them is only what "the answer" is, because
+     the three columns hold three different kinds of row.
+
+     A table rather than three listeners, because the listening is the
+     dropdown's job and it is written once for all three — see `chooseFrom`.
+     These are what it calls, and they are the only place a choice changes
+     anything.
+
+     Called once per choice, never while the client is moving through the list:
+     arrowing to a row makes it *active*, and only Enter or a click makes it the
+     answer. Re-asking the server for every row somebody scrolls past would be a
+     request per option and a catalogue that flickers. */
+
+  var CHOOSE = {
+    type: function (key) {
+      // "" is the placeholder, which is not a direction. Nothing offers it as a
+      // choice, but a reset can leave the button showing it.
+      state.type = key || null;
+      // Everything that depended on the direction, read off the chain rather
+      // than listed here — the two columns to its right, and the wallet.
+      resetAfter("type");
+      /* The rate is per direction (spec §5), and so is everything the details
+         collect. Dropping both here means a client who switches direction can
+         never submit against the other one's figures — loadOptions() fills them
+         in again for the direction they just chose. */
+      state.rate = null;
+      clearProof();
+      clearDestination();
+      renderDirection();
+      renderPicker();
+      loadOptions();
+    },
+
+    merchant: function (key) {
+      state.merchant = rowFor("merchant", key);
+      // The method column and the wallet, because the methods this merchant
+      // covers are about to replace the list the old choice came from.
+      resetAfter("merchant");
+      renderPicker();
+      loadOptions();
+    },
+
+    method: function (key) {
+      state.method = rowFor("method", key);
+      resetAfter("method");
+      renderPicker();
+      loadOptions();
+    }
+  };
 
   /* Two lists, one renderer. The second sits on the closed notice, because
-     screen 1 — where the first one lives — is one of the screens spec §7
+     the compose screen — where the first one lives — is the screen spec §7
      replaces, and a client who cannot file anything tonight is precisely the
      one who wants to look at what they filed this morning (step 11). */
   function renderHistory(rows) {
@@ -942,13 +1328,27 @@
      no rate for this direction, or nobody offering it. Said on the screen the
      client is standing on rather than one tap later, and worded per direction
      because the other one may be perfectly fine. */
+  /* The two directions. Rows here are plain strings, not the objects the other
+     two columns hold, because `state.type` *is* the string the submission
+     carries — so the answer and the row it came from are the same shape, as
+     they are in the other two columns.
+
+     The server still decides what may be offered: `available` is its call and
+     this filters on it. What stays local is only the wording and the arrow,
+     which are ours and identical on every install. */
+  function renderTypes(types) {
+    fillOptions("type", types.filter(function (row) {
+      return row.available !== false;
+    }).map(function (row) { return row.value; }));
+  }
+
   function renderTypeAvailability(data) {
     // Only once a direction has been chosen. Before that the catalogue on hand
     // is the server's default one, and "no merchant takes deposits" is not an
     // answer to a question the client has asked yet.
     var blocked = Boolean(state.type)
       && (!state.rate || (data.merchants || []).length === 0);
-    show(nodes.typeEmpty, blocked);
+    show(nodes.empties.type, blocked);
     if (blocked) {
       nodes.typeEmptyText.textContent = emptyText(EMPTY.type);
     }
@@ -957,114 +1357,42 @@
   /* --- the merchant column ------------------------------------------------ */
 
   function renderMerchants(merchants) {
-    clear(nodes.merchantChoices);
+    state.merchants = merchants;
 
     /* Whether the list is empty, and whether the column is unlocked, are two
        different facts and only renderPicker() knows the second. So the answer
        is recorded here and the showing is left to it — a locked column must
        not explain an emptiness the client has not asked about yet. */
     var none = merchants.length === 0;
-    nodes.merchantEmpty.dataset.empty = none ? "1" : "0";
+    nodes.empties.merchant.dataset.empty = none ? "1" : "0";
     if (none) {
       nodes.merchantEmptyText.textContent = emptyText(EMPTY.merchant);
     }
 
-    merchants.forEach(function (merchant) {
-      var button = make("button", "choice");
-      button.type = "button";
-      // What markChosen() compares against, so re-rendering the list keeps the
-      // mark on the right row without anybody tracking the old node.
-      button.setAttribute("data-key", String(merchant.id));
-
-      var body = make("div", "choice__body");
-      body.appendChild(make("span", "choice__title", merchant.name));
-      if (merchant.method_count) {
-        body.appendChild(make(
-          "span", "choice__note", merchant.method_count + " طريقة دفع"
-        ));
-      }
-      button.appendChild(body);
-
-      button.addEventListener("click", function () {
-        state.merchant = merchant;
-        // The method column and the wallet, because the methods this merchant
-        // covers are about to replace the list the old choice came from.
-        resetAfter("merchant");
-        renderPicker();
-        loadOptions();
-      });
-
-      nodes.merchantChoices.appendChild(button);
-    });
+    // The count is a note under the name now rather than glued onto it: the
+    // list has room for two lines and the name is what the client is reading.
+    fillOptions("merchant", merchants);
   }
 
-  /* --- screen 3: that merchant's payment methods --------------------------- */
+  /* --- the method column -------------------------------------------------- */
 
   function renderMethods(methods) {
-    clear(nodes.methodChoices);
+    state.methods = methods;
 
     var none = methods.length === 0;
-    nodes.methodEmpty.dataset.empty = none ? "1" : "0";
+    nodes.empties.method.dataset.empty = none ? "1" : "0";
     if (none) {
       // Two different emptinesses with two different answers: nothing has been
       // chosen yet, or what was chosen covers nothing. Only the second is the
-      // merchant's fault. The first is now unreachable — the column is locked
-      // and renders no list until a merchant is chosen — but it stays worded,
-      // because an emptiness that arrives out of order should still say why.
+      // merchant's fault. The first is unreachable — the column is disabled
+      // and empty until a merchant is chosen — but it stays worded, because an
+      // emptiness that arrives out of order should still say why.
       nodes.methodEmptyText.textContent = state.merchant
         ? emptyText(EMPTY.method)
         : EMPTY.methodNoMerchant;
     }
 
-    methods.forEach(function (method) {
-      var button = make("button", "choice");
-      button.type = "button";
-      button.setAttribute("data-key", String(method.code));
-
-      /* The icon is identification and nothing more: small, beside the name,
-         the size of a favicon. It is deliberately not the picture in this row —
-         that is the wallet's QR in the details below, which is a thing to point
-         a camera at. Two pictures of similar weight is exactly how a client
-         ends up scanning a logo. */
-      button.appendChild(methodIcon(method));
-
-      var body = make("div", "choice__body");
-      body.appendChild(make("span", "choice__title", method.caption));
-      button.appendChild(body);
-
-      button.addEventListener("click", function () {
-        state.method = method;
-        resetAfter("method");
-        renderPicker();
-        loadOptions();
-      });
-
-      nodes.methodChoices.appendChild(button);
-    });
-  }
-
-  function methodIcon(method) {
-    var art = make("span", "choice__icon");
-    if (method.icon) {
-      var image = document.createElement("img");
-      image.src = method.icon;
-      image.alt = "";
-      image.loading = "lazy";
-      // Finance may have uploaded nothing, or the file may have gone. Either
-      // way a monogram beats a broken image.
-      image.addEventListener("error", function () {
-        art.replaceChildren(monogram(method.caption));
-      });
-      art.appendChild(image);
-    } else {
-      art.appendChild(monogram(method.caption));
-    }
-    return art;
-  }
-
-  function monogram(caption) {
-    var text = (caption || "؟").trim().charAt(0);
-    return make("span", "choice__monogram", text);
+    fillOptions("method", methods);
   }
 
   /* The two empty states used to carry a button back to the screen that could
@@ -1084,8 +1412,6 @@
   function renderDirection() {
     var text = words();
 
-    nodes.methodLead.textContent = text.methodLead;
-    nodes.merchantLead.textContent = text.merchantLead;
     nodes.quoteCommissionLabel.textContent = text.commission;
     nodes.quoteTotalLabel.textContent = text.total;
     nodes.submitLabel.textContent = text.submit;
@@ -1903,7 +2229,10 @@
     go("compose", { replace: true, reset: true });
     show(nodes.back, false);
     // Before the first catalogue call, so the row paints locked-and-explained
-    // rather than blank for as long as the network takes.
+    // rather than blank for as long as the network takes — and so the one
+    // column that is open from the start has something in it. The payload
+    // refills it a moment later with whatever the server says is available.
+    renderTypes(DIRECTIONS.map(function (value) { return { value: value }; }));
     renderPicker();
     nodes.messageCount.textContent = "0 / " + config.messageMaxChars;
     loadOptions();

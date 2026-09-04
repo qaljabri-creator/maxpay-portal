@@ -584,12 +584,13 @@ So the flow navigates in the browser and talks to JSON.
 ```
 طلب جديد     the whole request, on one screen:
 
-             ┌─ نوع الطلب ──┬─ التاجر ─────┬─ طريقة الدفع ─┐
-             │ deposit or   │ merchants    │ the methods   │
-             │ withdrawal   │ who can take │ *that*        │
-             │              │ this         │ merchant      │
-             │              │ direction    │ covers        │
-             └──────────────┴──────────────┴───────────────┘
+             نوع الطلب        التاجر           طريقة الدفع
+             ┌───────────┬┐  ┌───────────┬┐  ┌───────────┬┐
+             │ ↓ إيداع   │⌄│  │ اختر…     │⌄│  │ ▣ زين كاش │⌄│
+             └───────────┴┘  └───────────┴┘  └───────────┴┘
+              deposit or      merchants who    the methods
+              withdrawal      take this        *that* merchant
+                              direction        covers
                           ↓ once all three are answered
              التفاصيل
                deposit:    wallet number + copy, or the QR to scan,
@@ -608,10 +609,32 @@ and a progress bar. The complaint was not speed. A client could not see what the
 had already chosen without walking back through it, and changing the first
 answer was three taps from wherever they were standing.
 
-Now the three choices are a row across the top, all of them on screen from the
-first paint, and the details appear underneath the moment the third is answered.
-Any answer is one tap from being changed, and what changing it costs is visible
-before you do it, because the columns to its right are right there.
+Now the three choices are a row of dropdowns across the top, all of them on
+screen from the first paint, and the details appear underneath the moment the
+third is answered. Any answer is one tap from being changed, and what changing
+it costs is visible before you do it, because the columns to its right are right
+there.
+
+**They are built, not native, and the reason is the payment method's logo.**
+They were `<select>` elements for a day, which was the right instinct and the
+wrong control: an `<option>` renders no markup, so the logo could not appear
+beside the name *in the list*, and the logo is how a client recognises the rail.
+They know the mark long before they read the string. Putting it beside the
+closed control instead only confirms a choice already made — it does not help
+make one, which is the job it is actually for.
+
+So each column is a button and a `role="listbox"`, with the icon inside every
+option. What that costs is everything the native control gave away for free,
+and it is paid for rather than skipped: `aria-expanded`, `aria-selected`,
+`aria-activedescendant`, the arrow keys roving the active option, Home and End,
+Enter and Space to take it, Escape to close and return focus to the button, a
+click elsewhere to dismiss, and `disabled` on the button when the column is
+locked. Written once and used by all three columns — three copies is how one of
+them ends up not closing on Escape.
+
+The icon stays deliberately small, at the size it had on the tiles. The large
+picture on this screen is the wallet's QR in the details, and a client should
+never be in doubt about which of the two is a thing to point a camera at.
 
 **The row is a chain, and `CHAIN` in `flow.js` is the only place that says so.**
 Which column is unlocked, what an answer invalidates, and whether the details
@@ -625,14 +648,39 @@ Changing an answer clears every answer after it and hides the details.
 A form quoting a rate and a wallet belonging to a merchant the client has just
 swapped is a form describing a request nobody is making.
 
-A **locked** column renders no list at all and says what it is waiting for.
-Not merely greyed: while no direction is chosen the merchants on hand are the
-*deposit* ones, because that is what `/portal/options/` defaults to, and showing
-them dimmed would be showing an answer to a question nobody has asked.
+A **locked** column is `disabled` *and* emptied, and its button reads the
+sentence saying what it is waiting for — the explanation lives in the control
+that is refusing, which is why no column carries a separate line of it.
 
-**On a phone the row is a column** — one choice above the next, which is the
+**No column carries a line of explanation at all.** There used to be one under
+each label — "choose the merchant you will transfer to" under a control labelled
+"the merchant" — which is the screen reading itself out loud. They were also
+three sentences of three different lengths, which is what stopped the three
+columns lining up.
+
+Emptied matters as much as disabled. While no direction is chosen the merchants
+on hand are the *deposit* ones, because that is what `/portal/options/` defaults
+to and it sends them with every payload regardless. Disabling alone would leave
+them in the DOM, one removed attribute from being offered as the answer to a
+question nobody asked.
+
+**The three columns line up by construction, not by luck.** Above the
+breakpoint `.picker__col` is `display: contents`, so the label, the control and
+the empty state become direct grid items and every label can sit in row 1, every
+control in row 2, every empty state in row 3. Each item is given its row and its
+column explicitly, which is not belt-and-braces: auto-placement flows the nine
+flattened items *across* the rows rather than down the columns, and the empty
+states are `display: none` almost always, so they occupy no cell and anything
+relying on flow order puts the next column's label in the gap they left. Both
+were true here before the coordinates were written down, and the row was
+visibly ragged.
+
+**On a phone the row is a column** — one dropdown above the next, which is the
 same order the wizard walked. Written that way round in the stylesheet: the
-three-column grid is what appears above 46rem, not what gets squeezed below it.
+three-column grid is what appears above 46rem, not what gets squeezed below it,
+and `display: contents` applies only inside that breakpoint because below it it
+would flatten the grouping into one undifferentiated stack. Each control clears
+`--tap` at every width.
 
 The details are the only part that differs by direction, and *how* they differ
 is the server's answer, not the script's guess: every `/portal/options/` payload

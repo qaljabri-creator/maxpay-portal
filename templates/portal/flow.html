@@ -80,77 +80,101 @@ view.{% endcomment %}
 
       <div class="picker" id="picker">
 
-        {# --------------------------------------------------------- type #}
+        {% comment %}Three dropdowns, and they are built rather than native.
+
+        They were `<select>` elements, which was the right instinct and the
+        wrong control. An `<option>` renders no markup, so a payment method's
+        logo could not appear beside its name in the list — and the logo is how
+        a client recognises the rail. They know the mark, not the string.
+
+        So: a button and a `role="listbox"`, with the icon inside each option
+        where it belongs. What that costs is everything the native control gave
+        away for free, and it is paid for explicitly rather than skipped —
+        `aria-expanded`, `aria-selected`, `aria-activedescendant`, roving the
+        active option with the arrow keys, Home and End, Escape returning focus
+        to the button, a click elsewhere closing the list, and `disabled` on the
+        button for a locked column. See `openList`, `closeList` and the keyboard
+        handler in static/js/flow.js.
+
+        `aria-labelledby` names each button with its column's label followed by
+        the current value, so it is announced as "the merchant, Ahmed Kadhim"
+        rather than as an unlabelled button.
+
+        The three are identical in structure, so the row reads as one control
+        repeated rather than three that happen to sit together. Nothing carries
+        a line of explanation under it: the label names the column and the list
+        shows what is in it, and a sentence saying "choose the merchant you will
+        transfer to" under a control already labelled "the merchant" is the
+        screen reading itself out loud. Dropping them is also what lets the
+        three columns line up exactly — see the grid in static/css/flow.css.
+
+        Locked columns are `disabled` and hold nothing but the sentence saying
+        what they are waiting for.{% endcomment %}
+
+        {# ---------------------------------------------------- type #}
         <div class="picker__col" id="pick-type">
-          <h2 class="picker__title">{% trans "نوع الطلب" %}</h2>
-          <p class="picker__lead">{% trans "ماذا تريد أن تفعل؟" %}</p>
+          <span class="picker__title" id="type-label">{% trans "نوع الطلب" %}</span>
 
-          <div class="choices choices--pick" id="type-choices">
-            <button type="button" class="choice" data-type="deposit" data-key="deposit" aria-pressed="false">
-              <span class="choice__icon" aria-hidden="true">
-                <svg class="icon icon--lg" viewBox="0 0 24 24">
-                  <path d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                        fill="none" stroke="currentColor" stroke-width="1.7"
-                        stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-              <span class="choice__body">
-                <span class="choice__title">{% trans "إيداع" %}</span>
-                <span class="choice__note">{% trans "أضِف رصيدًا إلى حسابك" %}</span>
-              </span>
+          <div class="dropdown" id="type-dropdown">
+            <button type="button" class="dropdown__button" id="type-button"
+                    aria-haspopup="listbox" aria-expanded="false"
+                    aria-controls="type-list"
+                    aria-labelledby="type-label type-value">
+              <span class="dropdown__icon" id="type-icon" hidden aria-hidden="true"></span>
+              <span class="dropdown__value" id="type-value"></span>
+              <span class="dropdown__chevron" aria-hidden="true"></span>
             </button>
 
-            <button type="button" class="choice" data-type="withdrawal" data-key="withdrawal" aria-pressed="false">
-              <span class="choice__icon" aria-hidden="true">
-                <svg class="icon icon--lg" viewBox="0 0 24 24">
-                  <path d="M12 14V3m0 0L8 7m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                        fill="none" stroke="currentColor" stroke-width="1.7"
-                        stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-              <span class="choice__body">
-                <span class="choice__title">{% trans "سحب" %}</span>
-                <span class="choice__note">{% trans "اسحب رصيدًا من حسابك" %}</span>
-              </span>
-            </button>
+            <ul class="dropdown__list" id="type-list" role="listbox" tabindex="-1"
+                aria-labelledby="type-label" hidden></ul>
           </div>
 
-          {% comment %}Every column carries one of these. A list that came back
-          empty is a fact the client is owed a reason for; a bordered box with
-          nothing in it is the screen saying "something went wrong" in a way
-          nobody can act on. The text is written from JS because the reason
-          depends on the direction and on what has been answered so far.
-          {% endcomment %}
           <div class="empty" id="type-empty" hidden>
             <p class="empty__text" id="type-empty-text"></p>
           </div>
         </div>
 
-        {% comment %}The merchant comes before the method: the client settles
-        who they are handing money to first, and only then sees what that
-        merchant covers.{% endcomment %}
-        {# ----------------------------------------------------- merchant #}
+        {# ---------------------------------------------------- merchant #}
         <div class="picker__col" id="pick-merchant">
-          <h2 class="picker__title">{% trans "التاجر" %}</h2>
-          <p class="picker__lead" id="merchant-lead">{% trans "اختر التاجر الذي ستحوّل إليه." %}</p>
+          <span class="picker__title" id="merchant-label">{% trans "التاجر" %}</span>
 
-          {% comment %}A locked column says what it is waiting for rather than
-          sitting blank. Blank reads as broken; a sentence reads as a queue.
-          {% endcomment %}
-          <p class="picker__wait" id="merchant-wait" hidden>{% trans "اختر نوع الطلب أولًا." %}</p>
-          <div class="choices choices--pick" id="merchant-choices"></div>
+          <div class="dropdown" id="merchant-dropdown">
+            <button type="button" class="dropdown__button" id="merchant-button"
+                    aria-haspopup="listbox" aria-expanded="false"
+                    aria-controls="merchant-list"
+                    aria-labelledby="merchant-label merchant-value" disabled>
+              <span class="dropdown__icon" id="merchant-icon" hidden aria-hidden="true"></span>
+              <span class="dropdown__value" id="merchant-value"></span>
+              <span class="dropdown__chevron" aria-hidden="true"></span>
+            </button>
+
+            <ul class="dropdown__list" id="merchant-list" role="listbox" tabindex="-1"
+                aria-labelledby="merchant-label" hidden></ul>
+          </div>
+
           <div class="empty" id="merchant-empty" hidden>
             <p class="empty__text" id="merchant-empty-text"></p>
           </div>
         </div>
 
-        {# ------------------------------------------------------- method #}
+        {# ---------------------------------------------------- method #}
         <div class="picker__col" id="pick-method">
-          <h2 class="picker__title">{% trans "طريقة الدفع" %}</h2>
-          <p class="picker__lead" id="method-lead">{% trans "اختر الطريقة التي ستحوّل بها من طرق هذا التاجر." %}</p>
+          <span class="picker__title" id="method-label">{% trans "طريقة الدفع" %}</span>
 
-          <p class="picker__wait" id="method-wait" hidden>{% trans "اختر التاجر أولًا." %}</p>
-          <div class="choices choices--pick" id="method-choices"></div>
+          <div class="dropdown" id="method-dropdown">
+            <button type="button" class="dropdown__button" id="method-button"
+                    aria-haspopup="listbox" aria-expanded="false"
+                    aria-controls="method-list"
+                    aria-labelledby="method-label method-value" disabled>
+              <span class="dropdown__icon" id="method-icon" hidden aria-hidden="true"></span>
+              <span class="dropdown__value" id="method-value"></span>
+              <span class="dropdown__chevron" aria-hidden="true"></span>
+            </button>
+
+            <ul class="dropdown__list" id="method-list" role="listbox" tabindex="-1"
+                aria-labelledby="method-label" hidden></ul>
+          </div>
+
           <div class="empty" id="method-empty" hidden>
             <p class="empty__text" id="method-empty-text"></p>
           </div>
