@@ -3,8 +3,10 @@
    -------------------------------------------------------------------------
    The documented sequence, in order:
 
-     1. the app loads inside the iframe and sends `embed-iframe-ready`
+     1. the listener is attached, then the app sends `embed-iframe-ready`
      2. it sends `embed-request-jwt-token`; B2CORE replies `embed-jwt-token`
+        with a `token` and an `expiresAt`, or refuses with
+        `embed-jwt-token-error`
      3. the token goes to the backend, which verifies it against the JWKS
      4. the verified subject becomes a local client record and a portal session
      5. `embed-logout` clears the session and discards any cached token
@@ -14,9 +16,10 @@
 
    * **Nothing is trusted by origin alone, and nothing at all is trusted
      without one.** Every inbound message is dropped unless `event.origin`
-     matches the configured B2CORE origin exactly. Every outbound message names
-     that origin as its target rather than `"*"`, so a token request is never
-     broadcast to whoever happens to be framing us.
+     matches the configured B2CORE origin exactly *and* `event.source` is the
+     window framing this one. Every outbound message names that origin as its
+     target rather than `"*"`, so a token request is never broadcast to
+     whoever happens to be framing us.
    * **The token is never stored.** It is held in a local variable for the
      length of one request and then dropped — no localStorage, no sessionStorage,
      no cookie. The session cookie the backend sets is the only thing that
@@ -46,6 +49,7 @@
 
   var IN = {
     token: "embed-jwt-token",
+    tokenError: "embed-jwt-token-error",
     logout: "embed-logout",
     theme: "embed-theme-change",
     language: "embed-language-change"
@@ -66,6 +70,7 @@
   var MESSAGES = {
     invalid_token: "انتهت صلاحية جلستك في B2CORE. حدّث الصفحة أو سجّل الدخول من جديد.",
     missing_token: "لم يصل رمز الدخول من B2CORE.",
+    token_rejected: "رفض B2CORE إصدار رمز الدخول. سجّل الدخول من جديد في B2CORE.",
     token_timeout: "لم يصل ردّ من B2CORE. تحقّق من اتصالك ثم أعد المحاولة.",
     key_unavailable: "تعذّر التحقق من الرمز حاليًا. أعد المحاولة بعد قليل.",
     not_configured: "التكامل مع B2CORE غير مهيّأ. تواصل مع الدعم الفني.",
@@ -87,6 +92,7 @@
   var session = null;        // the last session payload the backend returned
   var csrfToken = "";        // echoed back on every state-changing call
   var hostTheme = null;      // the last theme B2CORE announced, if it has
+  var tokenExpiresAt = null; // `expiresAt` from the last `embed-jwt-token`
   var tokenTimer = null;     // "B2CORE never answered" timeout
   var renewTimer = null;     // re-request a token before this one expires
   var pending = false;       // a token exchange is in flight
@@ -97,14 +103,20 @@
     if (titleNode && TITLES[state]) { titleNode.textContent = TITLES[state]; }
   }
 
-  function fail(code, remedy) {
+  function fail(code, remedy, detail) {
     clearTokenTimer();
     pending = false;
     if (errorNode) { errorNode.textContent = MESSAGES[code] || MESSAGES.unknown; }
-    if (errorCodeNode) { errorCodeNode.textContent = code ? "(" + code + ")" : ""; }
+    if (errorCodeNode) {
+      // `detail` is whatever B2CORE named as the reason. It is a support hint,
+      // not copy: bounded, and set as text so it stays text.
+      var label = code || "";
+      if (label && detail) { label += ": " + String(detail).slice(0, 80); }
+      errorCodeNode.textContent = label ? "(" + label + ")" : "";
+    }
     if (retryButton) { retryButton.hidden = !RETRYABLE[remedy || "retry"]; }
     setState("error");
-    notify({ authenticated: false, error: code });
+    notify({ authenticated: false, error: code, detail: detail || null });
   }
 
   function notify(payload) {
@@ -127,10 +139,13 @@
     if (tokenTimer) { window.clearTimeout(tokenTimer); tokenTimer = null; }
   }
 
-  function requestToken() {
+  function requestToken(silent) {
     if (pending) { return; }
     pending = true;
-    setState("connecting");
+    // A renewal runs under a live session. Flipping the stage back to
+    // "connecting" would drop the client out of whatever they were filling in
+    // — which is the one thing renewing early exists to prevent.
+    if (!silent || !session) { setState("connecting"); }
     send(OUT.requestToken);
     clearTokenTimer();
     tokenTimer = window.setTimeout(function () {
@@ -160,6 +175,51 @@
       }
     }
     return null;
+  }
+
+  /* `expiresAt` rides beside the token and is a number, which `messageValue`
+     deliberately does not return. It is read from the same three shapes. */
+  function messageNumber(data, key) {
+    if (!data || typeof data !== "object") { return null; }
+    var containers = [data, data.payload, data.data, data.value];
+    for (var i = 0; i < containers.length; i++) {
+      var container = containers[i];
+      if (!container || typeof container !== "object") { continue; }
+      var found = normaliseExpiry(container[key]);
+      if (found !== null) { return found; }
+    }
+    return null;
+  }
+
+  /* Epoch seconds, epoch milliseconds or an ISO-8601 string, all normalised to
+     epoch seconds. Anything past ~5138 read as seconds is milliseconds, and
+     nothing this protocol carries is a timestamp from before 1973. */
+  function normaliseExpiry(value) {
+    var seconds = null;
+    if (typeof value === "number" && isFinite(value)) {
+      seconds = value;
+    } else if (typeof value === "string" && value) {
+      if (/^[0-9]+$/.test(value)) {
+        seconds = parseInt(value, 10);
+      } else {
+        var parsed = Date.parse(value);
+        if (!isNaN(parsed)) { seconds = parsed / 1000; }
+      }
+    }
+    if (seconds === null || !(seconds > 0)) { return null; }
+    if (seconds > 1e11) { seconds = seconds / 1000; }
+    return Math.floor(seconds);
+  }
+
+  /* The session cannot outlive the token that created it, and the token cannot
+     outlive the session ceiling our own backend applies. Whichever dies first
+     is the one worth renewing against. */
+  function earliest(a, b) {
+    var left = normaliseExpiry(a);
+    var right = normaliseExpiry(b);
+    if (left === null) { return right; }
+    if (right === null) { return left; }
+    return Math.min(left, right);
   }
 
   /* --- talking to our own backend ---------------------------------------- */
@@ -211,13 +271,18 @@
       var name = (payload.client && payload.client.display_name) || "";
       greetingNode.textContent = name ? "أهلاً بك، " + name + "." : "";
     }
-    scheduleRenewal(payload.expires_at);
+    scheduleRenewal(earliest(payload.expires_at, tokenExpiresAt));
     setState("ready");
     notify(payload);
   }
 
   function exchange(token) {
     clearTokenTimer();
+    // A token can arrive unsolicited — B2CORE pushes one as soon as it sees a
+    // ready. `pending` means "an exchange is in flight" whether or not we were
+    // the ones who asked, so nothing else queues a second token request behind
+    // this one.
+    pending = true;
     return call(config.sessionUrl, { method: "POST", body: { token: token } })
       .then(function (result) {
         pending = false;
@@ -244,17 +309,26 @@
     var delay = (expiresAt * 1000) - Date.now() - margin;
     // setTimeout overflows past ~24.8 days and would fire immediately.
     if (delay <= 0 || delay > 2147483647) { return; }
-    renewTimer = window.setTimeout(requestToken, delay);
+    renewTimer = window.setTimeout(function () { requestToken(true); }, delay);
   }
 
-  function endSession() {
+  /* Drop the session — here and on the server — without saying why. The DELETE
+     goes out before `csrfToken` is cleared, because it carries it. */
+  function discardSession() {
     if (renewTimer) { window.clearTimeout(renewTimer); renewTimer = null; }
     clearTokenTimer();
+    pending = false;
+    tokenExpiresAt = null;
     return call(config.sessionUrl, { method: "DELETE" }).catch(function () {
-      // A failed logout call still means this page must stop showing a session.
+      // A failed call still means this page must stop showing a session.
     }).then(function () {
       session = null;
       csrfToken = "";
+    });
+  }
+
+  function endSession() {
+    return discardSession().then(function () {
       setState("logged-out");
       notify({ authenticated: false, reason: "logged_out" });
     });
@@ -287,15 +361,36 @@
     // The single most important line in this file.
     if (!config.parentOrigin || event.origin !== config.parentOrigin) { return; }
 
+    // An origin is not a frame. A second B2CORE tab, a popup it opened, a
+    // nested frame it hosts — all share that origin and all pass the line
+    // above. Only the window actually framing this page may speak here.
+    if (event.source !== window.parent) { return; }
+
     var type = messageType(event.data);
     if (!type) { return; }
 
     if (type === IN.token) {
       var token = messageValue(event.data, "token") || messageValue(event.data, "jwt");
       if (!token) { fail("missing_token", "reauthenticate"); return; }
+      tokenExpiresAt = messageNumber(event.data, "expiresAt");
+      if (tokenExpiresAt === null) { tokenExpiresAt = messageNumber(event.data, "expires_at"); }
       exchange(token);
       // The token is not kept anywhere: `token` goes out of scope with this
       // handler, and `exchange` holds it only until the request is sent.
+      return;
+    }
+
+    if (type === IN.tokenError) {
+      // B2CORE has refused to mint a token. Sitting out `tokenTimeoutMs` here
+      // would report a network problem for what is an authentication failure,
+      // and — on a renewal — would leave a live session standing for those
+      // fifteen seconds after the host has already said it is over.
+      var reason = messageValue(event.data, "error") ||
+                   messageValue(event.data, "reason") ||
+                   messageValue(event.data, "message");
+      discardSession().then(function () {
+        fail("token_rejected", "reauthenticate", reason);
+      });
       return;
     }
 
@@ -328,7 +423,7 @@
       if (session) { callback(session); }
     },
     /** Ask B2CORE for a fresh token — e.g. after a 401 from a portal call. */
-    reauthenticate: requestToken,
+    reauthenticate: function () { requestToken(); },
     /** A fetch that carries the portal session and its token header.
      *  Pass a FormData body for an upload; anything else is sent as JSON. */
     call: call
@@ -344,20 +439,26 @@
       return;
     }
 
+    // Announced before any work of our own. B2CORE will not answer a token
+    // request from a frame it has not heard a ready from, and putting a round
+    // trip to our own backend in front of it delays the whole handshake behind
+    // a call that has nothing to do with the host.
+    send(OUT.ready);
+
     // A session may already exist — a reload inside the frame, or a second
     // frame on the same page. Asking first avoids a needless token round trip.
-    call(config.sessionUrl).then(function (result) {
-      if (result.ok && result.data && result.data.authenticated) {
+    function probed(result) {
+      // Ready went out first, so a token may have arrived unsolicited while
+      // this was in flight. It wins; there is nothing left to ask for.
+      if (session || pending) { return; }
+      if (result && result.ok && result.data && result.data.authenticated) {
         adopt(result.data);
-        send(OUT.ready);
         return;
       }
-      send(OUT.ready);
       requestToken();
-    }).catch(function () {
-      send(OUT.ready);
-      requestToken();
-    });
+    }
+
+    call(config.sessionUrl).then(probed).catch(function () { probed(null); });
   }
 
   start();

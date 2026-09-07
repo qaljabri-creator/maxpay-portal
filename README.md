@@ -65,9 +65,10 @@ Both `devdata/` and `static/dev/` are git-ignored.
 python manage.py test
 python manage.py check --deploy --database default
 ruff check apps config manage.py
+node --test "tests/js/**/*.test.js"
 ```
 
-All three, and the middle one is not optional in CI. `--deploy` runs the
+The first three, and the middle one is not optional in CI. `--deploy` runs the
 settings checks in `apps/core/checks.py` and `apps/portal/checks.py`;
 `--database default` additionally asks the database whether the audit log's
 append-only triggers are still installed. Neither is reachable from
@@ -79,6 +80,12 @@ PostgreSQL to hand you can run it against SQLite:
 ```bash
 DATABASE_URL=sqlite:///smoke.sqlite3 python manage.py test
 ```
+
+The fourth covers `static/js/embed.js` — the B2CORE handshake, which the
+Django suite cannot reach because it runs in the browser. It needs Node and
+nothing else: `tests/js/harness.js` fakes the narrow slice of the DOM that
+script touches, so there is no `node_modules` tree and no build step. See
+*The B2CORE embed*.
 
 That is a smoke-test convenience only. **CI and every shared environment must
 run PostgreSQL**, which is the database the spec targets. On Windows, set
@@ -449,12 +456,37 @@ GET    /portal/method-icon/<code>/  a payment-method icon
 
 ### The handshake
 
-`static/js/embed.js` runs spec §4 in order: `embed-iframe-ready`, then
-`embed-request-jwt-token`, then the `embed-jwt-token` reply goes straight to
-`POST /portal/session/`. Every inbound message is dropped unless `event.origin`
-is exactly `B2CORE_ORIGIN`, and every outbound one names that origin as its
-target rather than `"*"` — a token request broadcast to whatever page happens to
-be framing us is a token handed to that page.
+`static/js/embed.js` runs spec §4 in order: the `message` listener is attached
+first, then `embed-iframe-ready` goes out, then `embed-request-jwt-token`, and
+the `embed-jwt-token` reply goes straight to `POST /portal/session/`. Ready is
+announced before the script asks our own backend whether a session already
+exists: B2CORE will not answer a request from a frame it has not heard a ready
+from, and putting a round trip of ours in front of that delays the whole
+handshake behind a call the host knows nothing about. A token may therefore
+arrive while that probe is still in flight; the token wins, and the probe's
+answer is dropped rather than queueing a second request.
+
+Every inbound message is dropped unless `event.origin` is exactly
+`B2CORE_ORIGIN` **and** `event.source` is `window.parent`. Origin alone does not
+identify a window: a second B2CORE tab, a popup it opened or a frame it nests
+all share that origin, and only the window actually framing this page has any
+business speaking to it. Every outbound message names that origin as its target
+rather than `"*"` — a token request broadcast to whatever page happens to be
+framing us is a token handed to that page.
+
+B2CORE can also refuse, with `embed-jwt-token-error`. That is handled where it
+arrives: the session is dropped immediately, here and on the server, rather than
+left standing until the fifteen-second `token_timeout` fires and reports a
+network problem for what is an authentication failure. Whatever reason the host
+named is shown beside the code, bounded and as text, because it is the only
+diagnostic support will have.
+
+`embed-jwt-token` carries an `expiresAt` beside the token, and the tokens
+B2CORE mints last an hour. The renewal is scheduled against whichever dies
+first — that expiry, or the session ceiling `apps/portal/session.py` applies —
+ninety seconds before it does. A renewal runs under a live session, so it does
+*not* flip the stage back to its connecting state: dropping the client out of a
+half-filled form is the very thing renewing early exists to prevent.
 
 The token is never stored. It lives in a local variable for the length of one
 request. The session cookie the backend sets is the only thing that outlives the
@@ -463,6 +495,14 @@ exchange, and it is `HttpOnly`, so the script cannot read it either.
 The page carries no inline script — configuration reaches it through a
 `json_script` island — which is what lets the CSP stay `default-src 'self'`
 alongside the `frame-ancestors` spec §11 asks for.
+
+`tests/js/embed_handshake.test.js` covers all of the above: the send order, the
+refusal, the three shapes `expiresAt` arrives in, and the messages that come
+from the right origin but the wrong window. It runs the real
+`static/js/embed.js` in a `node:vm` context against the hand-written DOM in
+`tests/js/harness.js` — five elements, one listener, `fetch` and the timers,
+which is everything that script touches. No `node_modules`, no build step:
+`node --test "tests/js/**/*.test.js"`.
 
 ### Verification is the whole of client authentication
 
