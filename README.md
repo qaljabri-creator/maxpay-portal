@@ -4,7 +4,9 @@ In-house deposit and withdrawal system for MaxiFyFX (MAXMANAG-212).
 Django 5 + DRF, PostgreSQL, Arabic RTL UI. See `maxpay-portal-spec.md` for the
 full specification.
 
-**Build status: steps 1–9 of the spec's build order are complete.**
+**Build status: all fourteen steps of the spec's build order (§12) are
+complete, and so are two more the spec does not number — user and role
+management (step 15) and the reports (step 16).**
 
 ---
 
@@ -295,8 +297,9 @@ the audit log, and the user re-enrols on next login.
 ## The Finance panel
 
 Lives at `/finance/` and is where a signed-in Finance user lands. Steps 3, 4
-and 7 build out most of what spec §9 lists; business hours and the audit viewer
-join them in later steps.
+and 7 build out most of what spec §9 lists; business hours (step 11), the audit
+viewer (step 12), user management (step 15) and the reports (step 16) fill in
+the rest.
 
 | Section | What it does |
 | --- | --- |

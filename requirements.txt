@@ -28,3 +28,7 @@ django-cors-headers==4.9.0
 PyJWT==2.13.0
 cryptography==50.0.0
 
+# The shared cache behind both rate limiters (spec §11) — build-order step 14.
+# Django ships the Redis *backend*, but not the client it drives; without this
+# a REDIS_URL only trades core.W010 for an ImportError on the first request.
+redis==8.1.0

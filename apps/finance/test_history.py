@@ -16,6 +16,7 @@ the wiring, and once through the queue, because the wiring is the other half.
 
 from decimal import Decimal
 from io import BytesIO
+from itertools import count
 
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
@@ -28,11 +29,26 @@ from apps.accounts.permissions import sync_role_groups
 from apps.accounts.tests import make_user, verify_otp
 from apps.finance.search import as_amount, query
 from apps.merchants.models import Merchant, MerchantMethod, PaymentMethod, Wallet
-from apps.transactions.models import Request, RequestStatus, RequestType
+from apps.transactions.models import (
+    PUBLIC_REF_PREFIX,
+    Request,
+    RequestStatus,
+    RequestType,
+)
 
 
 class HistoryTestCase(TestCase):
+    #: References are handed out from here rather than left to
+    #: ``Request.save``, which draws five random digits. The search below
+    #: matches the term against ``public_ref`` as well as the amounts, so a
+    #: request that happened to draw ``MP-77712`` would put a second row in
+    #: front of ``refs_for("777")`` and fail a test with nothing wrong with it.
+    #: Everything from 30001 up is clear of every figure this file searches
+    #: for — 250, 777, 363250 — and of the others' references.
+    REF_SEQUENCE_START = 30001
+
     def setUp(self):
+        self._refs = count(self.REF_SEQUENCE_START)
         sync_role_groups()
         self.admin = make_user("root@maxifyfx.com", Role.FINANCE_ADMIN)
         self.staff = make_user("staff@maxifyfx.com", Role.FINANCE_STAFF)
@@ -70,6 +86,7 @@ class HistoryTestCase(TestCase):
 
     def make_request(self, **overrides) -> Request:
         defaults = dict(
+            public_ref=f"{PUBLIC_REF_PREFIX}-{next(self._refs)}",
             type=RequestType.DEPOSIT,
             client=self.zainab,
             payment_method=self.method,
