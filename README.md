@@ -61,6 +61,44 @@ expires.
 
 Both `devdata/` and `static/dev/` are git-ignored.
 
+### Starting the demo over
+
+```bash
+python manage.py reset_demo                   # everything below the accounts
+python manage.py reset_demo --keep-merchants  # the traffic only
+```
+
+The companion to `seed_demo`, and the reason it exists rather than
+`rm dev.sqlite3 && migrate` is the second factors: re-enrolling a TOTP device by
+hand is the slowest part of setting this project up, and deleting the database
+takes them with it.
+
+| | |
+| --- | --- |
+| **Cleared** | requests, messages, attachments, read markers, the audit log, the merchant network, the payment methods, the client records |
+| **Kept** | internal users, their roles and groups, their TOTP devices, the exchange rates, the business-hours settings |
+
+`--keep-merchants` narrows it to the traffic alone and leaves the network and
+the clients standing — the one to reach for between two run-throughs of the same
+demo. It prints what it is about to delete and how many of each, then waits for
+the word `reset` to be typed; `--no-input` skips the prompt for scripts. Like
+`seed_demo` it **refuses to run unless `DEBUG` is on**, and for the mirror-image
+reason: that one creates accounts with known passwords, this one deletes a
+merchant network and an audit log.
+
+The audit log is append-only in the database (spec §11), so clearing it means
+dropping those triggers and putting them back. The command calls the migration's
+own `forward`/`backward` rather than keeping a second copy of the SQL, restores
+in a `finally`, and refuses to report success until it has asked the database
+that the triggers are actually back. There is **no button for any of this**, in
+the admin or anywhere else — it is a command on a laptop, and a reset that can
+be reached by a misclick is a different kind of tool.
+
+It resets the primary-key counters, so the next run-through numbers from 1
+again. It does not reset `public_ref`, because there is no counter behind it:
+the reference is five random digits precisely so a merchant cannot read the
+desk's volume off it, and giving it a sequence to restart would undo that.
+
 ### Tests and checks
 
 ```bash
