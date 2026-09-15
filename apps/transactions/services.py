@@ -697,7 +697,10 @@ def correct_amount(
             else Decimal("0")
         )
     try:
-        _converted, commission_iqd, total_iqd = pricing.price(
+        # The rounding is deliberately dropped here: it is recoverable from the
+        # stored trio at any time (see apps.portal.payloads.rounding_iqd) and
+        # the request has no column of its own to keep it in.
+        _converted, commission_iqd, _rounding, total_iqd = pricing.price(
             locked.rate_applied, commission_rate, amount, locked.type
         )
     except pricing.PricingError as exc:

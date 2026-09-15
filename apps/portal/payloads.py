@@ -17,6 +17,8 @@ Two rules hold throughout:
   (spec §5) — is an internal decision and stays internal.
 """
 
+from decimal import ROUND_HALF_UP
+
 from django.utils.translation import gettext as _
 
 from apps.core.choices import ActorRole
@@ -24,6 +26,7 @@ from apps.transactions import messaging
 from apps.transactions.models import Message, Request, RequestStatus, RequestType
 
 from . import attachments as attachment_urls
+from . import pricing
 
 #: The deposit lifecycle as a client experiences it (spec §6). The labels are
 #: outcomes rather than internal status names: "assigned" is a desk activity,
@@ -175,17 +178,37 @@ def summary_payload(deposit: Request) -> dict:
 
 
 def converted_iqd(deposit: Request):
-    """The conversion before the commission, reconstructed from what was stored.
+    """The conversion before the commission: ``amount_usd × rate_applied``.
 
-    ``amount_iqd`` is the figure that moved, and the commission is inside it in
-    opposite directions: added to what a deposit client transferred, taken off
-    what a withdrawal client received (see :mod:`apps.portal.pricing`). Undoing
-    it with the wrong sign would show a client a breakdown that does not add up
-    to the number they can see in their own bank app.
+    Computed from its own definition rather than reconstructed by undoing the
+    commission. Subtraction was how this worked, and it had two faults that the
+    rounding rule turned from latent into real: it needed the sign of the
+    direction, which is a rule a second caller can get wrong (and one did), and
+    it silently absorbed anything else inside ``amount_iqd`` — which since the
+    transfer rounding is up to 500 dinars of it.
+
+    Multiplication needs neither. It is what pricing computed, so it is what
+    comes back, in both directions and whatever else the total is carrying.
     """
+    return (deposit.amount_usd * deposit.rate_applied).quantize(
+        pricing.DINAR, rounding=ROUND_HALF_UP
+    )
+
+
+def rounding_iqd(deposit: Request):
+    """What the company put into, or took out of, the total to round it.
+
+    Not stored: it is exactly what ``amount_iqd`` has that the conversion and
+    the commission do not account for, so it is recovered rather than carried in
+    a column of its own. Requests filed before the rounding rule come back as
+    zero, which is the truth about them.
+    """
+    metered = converted_iqd(deposit)
     if deposit.type == RequestType.WITHDRAWAL:
-        return deposit.amount_iqd + deposit.commission_applied
-    return deposit.amount_iqd - deposit.commission_applied
+        metered -= deposit.commission_applied
+    else:
+        metered += deposit.commission_applied
+    return deposit.amount_iqd - metered
 
 
 def detail_payload(deposit: Request, client) -> dict:
@@ -201,9 +224,11 @@ def detail_payload(deposit: Request, client) -> dict:
         "rate_applied": f"{deposit.rate_applied:.2f}",
         "commission_applied": f"{deposit.commission_applied:.2f}",
         # amount_iqd already has the commission in it — added on a deposit,
-        # deducted on a withdrawal. The parts travel too, so the screen can show
-        # the same breakdown the client agreed to.
+        # deducted on a withdrawal — and the rounding on top of that. Every part
+        # travels, so the screen can show the same breakdown the client agreed
+        # to and have it reconcile to the figure in their own bank app.
         "converted_iqd": f"{converted_iqd(deposit):.2f}",
+        "rounding_iqd": f"{rounding_iqd(deposit):.2f}",
         "rejection_reason": deposit.rejection_reason,
         "timeline": timeline(deposit),
         "messages": [message_payload(m, client) for m in visible],

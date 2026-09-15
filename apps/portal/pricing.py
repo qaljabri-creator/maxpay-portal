@@ -17,7 +17,9 @@ hand the fee back on the way out.
 
 The USD figure is whatever the client typed, to the cent. The dinar figure that
 moves is rounded to the nearest thousand — see :data:`TRANSFER_STEP` for why —
-and the company absorbs the difference through its own fee.
+and the company absorbs the difference as a figure of its own, ``rounding_iqd``,
+which is the fourth thing a quote carries and the only one the rate has no say
+in. It is at most 500 dinars and it may point either way.
 
 ``Request.amount_iqd`` stores that *total* either way, because it is the number
 that actually moves between the client and the merchant, and therefore the only
@@ -75,9 +77,15 @@ DINAR = Decimal("1")
 #:
 #: The rounding is to the *nearest* thousand in both directions — deposit and
 #: withdrawal alike — so the gap is never more than 500 dinars, and it is the
-#: company that wears it: the conversion stays exactly ``amount × rate`` and the
-#: adjustment comes out of (or goes into) the commission, which is the only part
-#: of the total that is the company's own money.
+#: company that wears it.
+#:
+#: It is wearing it **directly**, not through the commission. That was the first
+#: attempt and it was wrong: this desk's commission is normally zero — the
+#: channel is not a revenue line — and a fee of zero has nothing to absorb a
+#: rounding with. It came out as a commission of −50 dinars, which is not a fee
+#: anyone charged. So the adjustment is now its own figure, kept beside the
+#: commission rather than inside it, and it is the only one of the three that
+#: does not come from the rate.
 TRANSFER_STEP = Decimal("1000")
 
 #: Which rate governs which direction (spec §5).
@@ -231,12 +239,19 @@ class Quote:
     ``total_iqd`` is the figure that moves: what a deposit client transfers to
     the merchant, and what a withdrawal client receives from one. ``direction``
     says which, so a caller never has to infer it from the arithmetic.
+
+    ``rounding_iqd`` is what the company put in, or took out, to make the total
+    land on a whole :data:`TRANSFER_STEP`. Zero on most amounts, never more than
+    half a step, and either sign. It is carried separately rather than folded
+    into the commission because a desk running at no commission at all — which
+    is this one — has nothing to fold it into.
     """
 
     rate: ExchangeRate
     amount_usd: Decimal
     converted_iqd: Decimal
     commission_iqd: Decimal
+    rounding_iqd: Decimal
     total_iqd: Decimal
     direction: str = RequestType.DEPOSIT
 
@@ -250,6 +265,7 @@ class Quote:
             "amount_usd": f"{self.amount_usd:.2f}",
             "converted_iqd": f"{self.converted_iqd:.2f}",
             "commission_iqd": f"{self.commission_iqd:.2f}",
+            "rounding_iqd": f"{self.rounding_iqd:.2f}",
             "total_iqd": f"{self.total_iqd:.2f}",
         }
 
@@ -270,8 +286,8 @@ def price(
     commission_per_100: Decimal,
     amount_usd: Decimal,
     request_type: str,
-) -> tuple[Decimal, Decimal, Decimal]:
-    """The three dinar figures, from the two numbers a rate is made of.
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    """The four dinar figures, from the two numbers a rate is made of.
 
     Split out of :func:`quote` so a *correction* can reprice a request without
     an ``ExchangeRate`` row to hand: Finance asked that an edited request keep
@@ -279,25 +295,29 @@ def price(
     not a pointer to the row they came from (spec §5). One implementation, so a
     corrected request and a fresh one cannot be priced by two different rules.
 
-    The returned commission is the **effective** one: the nominal fee the rate
-    prorates, plus or minus whatever rounding the total to
-    :data:`TRANSFER_STEP` moved. That is the company absorbing the difference,
-    and it is also what keeps ``converted ± commission == total`` exactly —
-    which the client's breakdown and
-    :func:`apps.portal.payloads.converted_iqd` both reconstruct the conversion
-    by.
+    Returns four figures, in the order they are built: the conversion, the
+    commission, the rounding, and the total they come to.
+
+    Each is exactly one thing, and none of them is quietly carrying another.
+    The conversion is ``amount × rate``. The commission is what the rate
+    prorates — nothing else moves it, so a desk quoting no commission gets a
+    commission of zero rather than a rounding remainder wearing its name. The
+    rounding is the company's own contribution, whatever it takes to land the
+    total on a whole :data:`TRANSFER_STEP`, and it is the only one of the four
+    the rate has no say in.
     """
     if request_type not in RATE_TYPE_FOR_REQUEST:
         raise PricingError("unknown_type", _("نوع طلب غير معروف."))
 
     amount = Decimal(amount_usd)
     converted = (amount * Decimal(iqd_per_usd)).quantize(DINAR, rounding=ROUND_HALF_UP)
-    nominal = ((amount / Decimal("100")) * Decimal(commission_per_100)).quantize(
+    commission = ((amount / Decimal("100")) * Decimal(commission_per_100)).quantize(
         DINAR, rounding=ROUND_HALF_UP
     )
 
     if request_type == RequestType.WITHDRAWAL:
-        total = to_transfer_step(converted - nominal)
+        subtotal = converted - commission
+        total = to_transfer_step(subtotal)
         # A rounded payout is either nothing or at least one whole step, so this
         # is the same refusal as before: nobody is paid zero, and a withdrawal
         # that yields zero is not a smaller withdrawal, it is one the client
@@ -306,14 +326,13 @@ def price(
             raise PricingError(
                 "amount_below_commission",
                 _("العمولة (%(fee)s دينار) تستهلك المبلغ بالكامل. اسحب مبلغًا أكبر.")
-                % {"fee": f"{nominal:,.0f}"},
+                % {"fee": f"{commission:,.0f}"},
             )
-        commission = converted - total
     else:
-        total = to_transfer_step(converted + nominal)
-        commission = total - converted
+        subtotal = converted + commission
+        total = to_transfer_step(subtotal)
 
-    return converted, commission, total
+    return converted, commission, total - subtotal, total
 
 
 def quote(rate: ExchangeRate, amount_usd: Decimal, request_type: str) -> Quote:
@@ -321,10 +340,12 @@ def quote(rate: ExchangeRate, amount_usd: Decimal, request_type: str) -> Quote:
 
     ``converted_iqd`` is exactly ``amount × rate``, rounded once to the whole
     dinar — it is the figure a client can check against the published rate, so
-    nothing else is allowed to move it. ``total_iqd`` is then rounded to the
-    nearest :data:`TRANSFER_STEP`, and ``commission_iqd`` is whatever closes the
-    gap between the two. The three figures therefore still add up on screen,
-    which on a receipt matters more than a tidy fee.
+    nothing else is allowed to move it. ``commission_iqd`` is what the rate
+    prorates, and is zero when the rate says zero. ``total_iqd`` is the two of
+    them rounded to the nearest :data:`TRANSFER_STEP`, and ``rounding_iqd`` is
+    the difference that rounding made. All four still reconcile on screen —
+    ``converted ± commission + rounding == total`` — which on a receipt matters
+    more than one figure fewer.
 
     On a withdrawal the commission comes *off* the payout, and a commission that
     would leave nothing (or less than nothing) is a refusal rather than a clamp:
@@ -334,7 +355,7 @@ def quote(rate: ExchangeRate, amount_usd: Decimal, request_type: str) -> Quote:
     if request_type not in RATE_TYPE_FOR_REQUEST:
         raise PricingError("unknown_type", _("نوع طلب غير معروف."))
 
-    converted, commission, total = price(
+    converted, commission, rounding, total = price(
         rate.iqd_per_usd, rate.commission_iqd_per_100usd, amount_usd, request_type
     )
 
@@ -343,6 +364,7 @@ def quote(rate: ExchangeRate, amount_usd: Decimal, request_type: str) -> Quote:
         amount_usd=amount_usd,
         converted_iqd=converted,
         commission_iqd=commission,
+        rounding_iqd=rounding,
         total_iqd=total,
         direction=request_type,
     )

@@ -243,12 +243,15 @@ function boot(options = {}) {
       input.dispatch("input");
     },
 
-    /** The three figures the client reads, as text. */
+    /** The figures the client reads, as text, and whether each row is shown. */
     quote() {
       return {
         converted: lookup("quote-converted").textContent,
         commission: lookup("quote-commission").textContent,
+        rounding: lookup("quote-rounding").textContent,
         total: lookup("quote-total").textContent,
+        commissionShown: !lookup("quote-commission-row").hidden,
+        roundingShown: !lookup("quote-rounding-row").hidden,
       };
     },
   };
@@ -274,13 +277,14 @@ function catalogue(rate) {
   };
 }
 
-/** A rate payload shaped exactly as apps.portal.pricing.rate_payload builds it. */
+/** A rate payload shaped exactly as apps.portal.pricing.rate_payload builds it.
+ *  The default charges no commission, because that is what the desk charges. */
 function rate(overrides = {}) {
   return Object.assign(
     {
       id: 1,
-      iqd_per_usd: "1470.00",
-      commission_iqd_per_100usd: "5000.00",
+      iqd_per_usd: "1510.00",
+      commission_iqd_per_100usd: "0.00",
       commission_sign: 1,
       effective_from: "2026-09-01T00:00:00+00:00",
       min_usd: "1.00",

@@ -46,8 +46,11 @@ rather than pretending to know how far the request got.{% endcomment %}
             <div class="figure__l">{% trans "يحوّل العميل" %}</div>
             <div class="figure__v num">{{ req.amount_iqd|floatformat:"-2u" }} <span class="unit">{% trans "د.ع" %}</span></div>
             <div class="figure__f num">
-              {{ converted_iqd|floatformat:"-2u" }} + {{ req.commission_applied|floatformat:"-2u" }}
-              <span class="unit">{% trans "عمولة" %}</span>
+              {{ converted_iqd|floatformat:"-2u" }}{% if req.commission_applied %}
+                {{ commission_sign }} {{ req.commission_applied|floatformat:"-2u" }}
+                <span class="unit">{% trans "عمولة" %}</span>{% endif %}{% if rounding_iqd %}
+                {{ rounding_sign }} {{ rounding_abs|floatformat:"-2u" }}
+                <span class="unit">{% trans "تقريب" %}</span>{% endif %}
             </div>
           </div>
           <div class="figure">

@@ -25,8 +25,15 @@ from django.views.generic import DetailView, ListView
 from apps.core.choices import ActorRole
 from apps.merchants import capacity
 from apps.merchants.models import Wallet
+from apps.portal import payloads as portal_payloads
 from apps.transactions import messaging, reads
-from apps.transactions.models import Attachment, Message, Request, RequestStatus
+from apps.transactions.models import (
+    Attachment,
+    Message,
+    Request,
+    RequestStatus,
+    RequestType,
+)
 from apps.transactions.services import (
     AMOUNT_EDITABLE_STATUSES,
     AWAITING_FINANCE,
@@ -307,7 +314,19 @@ class RequestDetailView(QueueAccessMixin, DetailView):
         context["merchant_reading"] = (
             req.merchant_assigned.name if req.merchant_assigned_id else None
         )
-        context["converted_iqd"] = req.amount_iqd - req.commission_applied
+        # The client's own breakdown, not a second copy of it. Subtracting the
+        # commission here was right for a deposit and wrong for a withdrawal,
+        # where the fee comes *off* the payout — and it had no idea about the
+        # transfer rounding at all.
+        context["converted_iqd"] = portal_payloads.converted_iqd(req)
+        context["commission_sign"] = "−" if req.type == RequestType.WITHDRAWAL else "+"
+        # Signs are decided here rather than in the template: a template that
+        # branches on a negative renders the minus twice as readily as once,
+        # and the figure it is branching on is money.
+        rounding = portal_payloads.rounding_iqd(req)
+        context["rounding_iqd"] = rounding
+        context["rounding_sign"] = "+" if rounding >= 0 else "−"
+        context["rounding_abs"] = abs(rounding)
         context["wallet_usage"] = self._wallet_usage(req)
         context["rerouted"] = bool(
             req.merchant_assigned_id

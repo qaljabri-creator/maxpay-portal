@@ -1870,19 +1870,52 @@ ordinary transfers between people look like, so that is what these are.
 | --- | --- |
 | **USD** | exactly what the client typed — untouched |
 | **The transferred IQD** | rounded to the nearest 1,000, both directions |
-| **The gap (≤ 500)** | the company's, taken out of its own commission |
+| **The gap (≤ 500)** | the company's, and a line of its own |
 
 To the *nearest*, not up: always rounding up would quietly overcharge every
 deposit and always down would give money away. And in both directions, deposit
 and withdrawal alike — the withdrawal is the one that actually arrives in the
 client's own account, so if only one were rounded it would have to be that one.
 
-**Who pays for it.** The conversion line stays exactly `amount × rate`, because
-that is the figure a client checks against the published rate and nothing is
-allowed to move it. The adjustment comes out of the commission instead, which is
-the only part of the total that is the company's own money. So the three lines
-still add up — `converted ± commission == total` — which `payloads.converted_iqd`
-and the Finance queue both reconstruct the conversion by.
+**Who pays for it, and where that shows.** A quote carries four figures, and
+each one is exactly one thing:
+
+| | |
+| --- | --- |
+| `converted_iqd` | `amount × rate`, and nothing is allowed to move it — it is what a client checks against the published rate |
+| `commission_iqd` | what the rate prorates. Zero when the rate says zero |
+| `rounding_iqd` | the company's own contribution, ≤ 500, either sign. The only one the rate has no say in |
+| `total_iqd` | what moves. `converted ± commission + rounding` |
+
+The rounding was first taken **out of the commission**, on the reasoning that
+the fee is the company's money and so is the gap. That was wrong, and the way it
+was wrong is worth keeping written down: **this desk's commission is normally
+zero** — the channel is not a revenue line — and a fee of zero has nothing to
+absorb a rounding with. $155 at 1,510 came out as a commission of −50 dinars,
+which is not a fee anybody charged. So the adjustment is its own figure now,
+kept beside the commission rather than inside it.
+
+**Two rows disappear when they are zero.** A commission of zero and a rounding
+that did not happen are not facts about a request, and a row reading `0 د.ع`
+only invites a question it has no answer to. Both the live quote and the request
+summary omit them.
+
+**Recovering the breakdown afterwards.** `payloads.converted_iqd` computes
+`amount_usd × rate_applied` rather than undoing the commission. Subtraction was
+how it worked and it had two faults the rounding turned from latent into real:
+it needed the sign of the direction, which a second caller can get wrong — the
+Finance queue kept its own copy and had it backwards for withdrawals — and it
+silently swallowed anything else inside `amount_iqd`, which since the rounding is
+up to 500 dinars of it. Multiplication needs neither. `payloads.rounding_iqd`
+then recovers the adjustment as what the total has left over, so no column had to
+be added for it; a request filed before the rule reports zero, which is the truth
+about it.
+
+**The arithmetic runs in hundredths, not floats.** `(99.99 / 100) * 5000` is
+4999.4999… in binary and `Math.round` took it to 4,999, where `Decimal` makes it
+exactly 4,999.5 and rounds to 5,000. Python is the side that charges, so
+`flow.js` scales to whole sub-units first and the halves land where `Decimal` has
+them.
 
 **It is stored, not formatted.** `Request.amount_iqd` holds the rounded figure,
 because it is the number a merchant matches the receipt against and the number
@@ -1892,12 +1925,17 @@ agrees with. Corrections go through the same `pricing.price`, so a corrected
 request is no less round than a fresh one.
 
 **How the two implementations are held together.** `tests/pricing_cases.json` is
-a committed table of 22 cases across both directions.
-`apps/portal/tests/test_flow.py::PricingContractTests` asserts `pricing.price`
-produces it and that the table itself obeys the rule;
-`tests/js/flow_quote.test.js` boots the real `flow.js` against a fake DOM and
-asserts the quote it paints matches the same table. Either side drifting fails
-its own test, and the table says which one is wrong.
+a committed table of 48 cases: both directions, across a zero-commission rate and
+a charging one. `apps/portal/tests/test_flow.py::PricingContractTests` asserts
+`pricing.price` produces it *and* that the table itself obeys the rule — checked
+against the rule rather than against what the code returns, so regenerating it
+cannot launder a bug into the contract. `tests/js/flow_quote.test.js` boots the
+real `flow.js` against a fake DOM and asserts the quote it paints matches the
+same table. Either side drifting fails its own test, and the table says which one
+is wrong.
+
+The zero-commission rows are there because that is the desk's real configuration
+and the earlier table did not cover it — which is exactly how the −50 got out.
 
 **Display shows up to two places and hides them when zero.** Not exactly zero
 places: a request settled *before* this rule may hold a real half-dinar, and

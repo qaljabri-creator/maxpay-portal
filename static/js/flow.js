@@ -407,6 +407,9 @@
     quoteConverted: el("quote-converted"),
     quoteCommission: el("quote-commission"),
     quoteCommissionLabel: el("quote-commission-label"),
+    quoteCommissionRow: el("quote-commission-row"),
+    quoteRounding: el("quote-rounding"),
+    quoteRoundingRow: el("quote-rounding-row"),
     quoteTotal: el("quote-total"),
     quoteTotalLabel: el("quote-total-label"),
 
@@ -525,6 +528,27 @@
   function iqd(value) {
     var text = dinars(value);
     return text === null ? "···" : text + " د.ع";
+  }
+
+  /* Money is computed in whole sub-units here, never in floats.
+
+     `(99.99 / 100) * 5000` is 4999.499999999999 in binary and rounds to 4,999.
+     Python's Decimal makes it exactly 4,999.5 and ROUND_HALF_UP takes it to
+     5,000 — and Python is the one that charges, so a preview that says 4,999
+     is a preview the confirmation contradicts by a dinar. Scaling to hundredths
+     first makes every product an exact integer and puts the halves back exactly
+     where Decimal has them. */
+  function subunits(value) {
+    return Math.round(Number(value) * 100);
+  }
+
+  /* The rounding is the one dinar figure that can be negative, and its sign is
+     the point of it: +200 is the company topping the transfer up, −50 is it
+     taking a little off. So the sign is always written, including the plus. */
+  function signedIqd(value) {
+    var number = Number(value);
+    if (!isFinite(number)) { return "···"; }
+    return (number >= 0 ? "+" : "−") + " " + iqd(Math.abs(number));
   }
 
   function usd(value) {
@@ -1524,6 +1548,9 @@
       nodes.quoteConverted.textContent = "···";
       nodes.quoteCommission.textContent = "···";
       nodes.quoteTotal.textContent = "···";
+      // Nothing is known yet, so neither optional row can claim to be zero.
+      show(nodes.quoteCommissionRow, true);
+      show(nodes.quoteRoundingRow, false);
       return;
     }
 
@@ -1533,9 +1560,12 @@
     // whole dinar, total to the nearest TRANSFER_STEP, commission closing the
     // gap — because a preview that rounded differently would show a figure the
     // submission then contradicts.
-    var converted = Math.round(amount * Number(state.rate.iqd_per_usd));
-    var nominal = Math.round(
-      (amount / 100) * Number(state.rate.commission_iqd_per_100usd)
+    // amount × rate, and amount ÷ 100 × fee, both in hundredths: the products
+    // are exact integers and the scale divides back out at the end.
+    var cents = subunits(amount);
+    var converted = Math.round(cents * subunits(state.rate.iqd_per_usd) / 10000);
+    var commission = Math.round(
+      cents * subunits(state.rate.commission_iqd_per_100usd) / 1000000
     );
     // Which way the fee points is the server's decision, travelling with the
     // rate: added to what a deposit transfers, deducted from what a withdrawal
@@ -1547,14 +1577,23 @@
     // Rounded to the nearest thousand dinars, in both directions. Odd figures
     // arriving in a personal Iraqi wallet read as a business trading through a
     // personal account, and that is what gets one frozen. The company wears the
-    // difference — at most 500 — and it comes out of the commission, so the
-    // conversion stays checkable against the published rate and the three lines
-    // still add up.
-    var total = Math.round((converted + sign * nominal) / TRANSFER_STEP) * TRANSFER_STEP;
-    var commission = sign * (total - converted);
+    // difference — at most 500 — as a figure of its own rather than inside the
+    // fee, because this desk's fee is normally zero and zero has nothing to
+    // absorb a rounding with.
+    var subtotal = converted + sign * commission;
+    var total = Math.round(subtotal / TRANSFER_STEP) * TRANSFER_STEP;
+    var rounding = total - subtotal;
 
     nodes.quoteConverted.textContent = iqd(converted);
+
+    // A commission of zero is not news. The desk normally charges none, and a
+    // row reading "0 د.ع" only invites a question about a fee nobody is paying.
+    show(nodes.quoteCommissionRow, commission !== 0);
     nodes.quoteCommission.textContent = iqd(commission);
+
+    show(nodes.quoteRoundingRow, rounding !== 0);
+    nodes.quoteRounding.textContent = signedIqd(rounding);
+
     // A payout the commission swallowed is not a smaller withdrawal; the server
     // refuses it, so there is no figure to show for it here either. Rounded,
     // a payout is either nothing or a whole step, so the threshold is the step.
@@ -1904,7 +1943,15 @@
     addRow(nodes.requestSummary, "النوع", payload.type_label);
     addRow(nodes.requestSummary, "المبلغ", usd(payload.amount_usd));
     addRow(nodes.requestSummary, "سعر الصرف", iqd(payload.rate_applied) + " / $");
-    addRow(nodes.requestSummary, text.commission, iqd(payload.commission_applied));
+    // Both of these are omitted rather than shown as zero, for the same reason
+    // the live quote omits them: a fee nobody charged and a rounding that did
+    // not happen are not facts about this request.
+    if (Number(payload.commission_applied)) {
+      addRow(nodes.requestSummary, text.commission, iqd(payload.commission_applied));
+    }
+    if (Number(payload.rounding_iqd)) {
+      addRow(nodes.requestSummary, "تقريب لأقرب ألف", signedIqd(payload.rounding_iqd));
+    }
     addRow(nodes.requestSummary, text.totalRow, iqd(payload.amount_iqd));
     addRow(nodes.requestSummary, "طريقة الدفع", payload.method);
     addRow(nodes.requestSummary, "التاجر", payload.merchant);

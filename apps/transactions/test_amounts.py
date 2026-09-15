@@ -34,6 +34,7 @@ from apps.accounts.tests import make_user, verify_otp
 from apps.core.choices import AuditAction
 from apps.core.models import AuditLog
 from apps.merchants.models import Merchant, MerchantMethod, PaymentMethod, Wallet
+from apps.portal.payloads import converted_iqd, rounding_iqd
 from apps.rates.models import ExchangeRate, RateType
 from apps.transactions.messaging import FINANCE, visible_messages
 from apps.transactions.models import Request, RequestStatus, RequestType
@@ -112,10 +113,11 @@ class CorrectionArithmeticTests(AmountTestCase):
 
         self.assertEqual(corrected.amount_usd, Decimal("60.00"))
         # 60 × 1,470 = 88,200, fee re-prorated to 3,000, total 91,200 — then
-        # rounded to the nearest thousand, which is what actually moves, and
-        # the 200 comes off the fee (Finance, 15 Sep 2026).
+        # rounded down to the nearest thousand, which is what actually moves.
+        # The 200 is the company's own, and it is not taken out of the fee: the
+        # fee is still exactly what the rate prorates (Finance, 15 Sep 2026).
         self.assertEqual(corrected.amount_iqd, Decimal("91000.00"))
-        self.assertEqual(corrected.commission_applied, Decimal("2800.00"))
+        self.assertEqual(corrected.commission_applied, Decimal("3000.00"))
 
     def test_the_original_amount_is_kept_not_overwritten(self):
         corrected = correct_amount(self.deposit, "60", actor=self.admin)
@@ -141,9 +143,9 @@ class CorrectionArithmeticTests(AmountTestCase):
 
     def test_the_commission_is_re_prorated_not_kept(self):
         """It is defined per 100 dollars. 5,000 on a $60 request is not what
-        that rate says — 3,000 is, less the 200 the rounding took off it."""
+        that rate says; 3,000 is, and the transfer rounding does not touch it."""
         corrected = correct_amount(self.deposit, "60", actor=self.admin)
-        self.assertEqual(corrected.commission_applied, Decimal("2800.00"))
+        self.assertEqual(corrected.commission_applied, Decimal("3000.00"))
 
     def test_correcting_upward_works_the_same_way(self):
         corrected = correct_amount(self.deposit, "150", actor=self.admin)
@@ -171,14 +173,19 @@ class CorrectionArithmeticTests(AmountTestCase):
                 )
 
     def test_the_conversion_is_still_recoverable_after_a_correction(self):
-        """The rounding went into the fee, not into the conversion, so taking
-        the fee back off ``amount_iqd`` returns exactly amount × rate — which
-        is how the Finance queue and the client's breakdown both show it."""
+        """Not by subtracting the fee from the total — the rounding is in there
+        too, and taking only the fee back off would be 200 short. The conversion
+        is recovered from its own definition, which is what the Finance queue
+        and the client's breakdown both now use."""
         corrected = correct_amount(self.deposit, "60", actor=self.admin)
 
+        self.assertEqual(converted_iqd(corrected), Decimal("88200"))
+        self.assertEqual(rounding_iqd(corrected), Decimal("-200"))
         self.assertEqual(
-            corrected.amount_iqd - corrected.commission_applied,
-            Decimal("88200.00"),
+            converted_iqd(corrected)
+            + corrected.commission_applied
+            + rounding_iqd(corrected),
+            corrected.amount_iqd,
         )
 
     def test_a_second_correction_still_measures_from_the_original(self):
@@ -188,10 +195,10 @@ class CorrectionArithmeticTests(AmountTestCase):
         corrected = correct_amount(fresh, "80", actor=self.admin)
 
         self.assertEqual(corrected.amount_usd, Decimal("80.00"))
-        # 117,600 + 4,000 = 121,600, rounded up to 122,000; the 400 is the
-        # company's, added to the fee rather than to the conversion.
+        # 117,600 + 4,000 = 121,600, rounded up to 122,000. The 400 is the
+        # company's contribution and lives on none of the other lines.
         self.assertEqual(corrected.amount_iqd, Decimal("122000.00"))
-        self.assertEqual(corrected.commission_applied, Decimal("4400.00"))
+        self.assertEqual(corrected.commission_applied, Decimal("4000.00"))
         self.assertEqual(corrected.submitted_amount_usd, Decimal("100.00"))
 
     def test_a_withdrawal_deducts_the_re_prorated_fee(self):
@@ -210,10 +217,10 @@ class CorrectionArithmeticTests(AmountTestCase):
         corrected = correct_amount(withdrawal, "60", actor=self.admin)
 
         # 88,200 − 3,000 on a withdrawal: the fee comes off the payout. 85,200
-        # then rounds down to 85,000, and the 200 is charged to the fee — the
-        # client still receives a figure their wallet will not flag.
+        # then rounds down to 85,000, so the client receives a figure their
+        # wallet will not flag, and the 200 is the company's.
         self.assertEqual(corrected.amount_iqd, Decimal("85000.00"))
-        self.assertEqual(corrected.commission_applied, Decimal("3200.00"))
+        self.assertEqual(corrected.commission_applied, Decimal("3000.00"))
 
     def test_an_unchanged_amount_is_refused_rather_than_written(self):
         with self.assertRaises(TransitionError) as caught:
