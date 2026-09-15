@@ -500,6 +500,11 @@
     });
   }
 
+  /* The step the transferred dinar figure is rounded to, mirroring
+     apps/portal/pricing.TRANSFER_STEP. Kept as a constant rather than spelled
+     into the arithmetic so the two files can be grepped against each other. */
+  var TRANSFER_STEP = 1000;
+
   /* Dinars, to the whole dinar.
 
      The fils is out of circulation, so `1,490.00 د.ع` shows a denomination
@@ -1523,13 +1528,13 @@
     }
 
     // A preview only. apps/portal/submissions recomputes this from the same
-    // rate row and is what the client is actually charged, or paid.
-    // Rounded to the whole dinar, the same way and in the same order as
-    // apps/portal/pricing.quote — each component on its own, then the total
-    // from the rounded pair. A preview that rounded differently would show a
-    // figure the submission then contradicts.
+    // rate row and is what the client is actually charged, or paid. The order
+    // below is apps/portal/pricing.price step for step — conversion to the
+    // whole dinar, total to the nearest TRANSFER_STEP, commission closing the
+    // gap — because a preview that rounded differently would show a figure the
+    // submission then contradicts.
     var converted = Math.round(amount * Number(state.rate.iqd_per_usd));
-    var commission = Math.round(
+    var nominal = Math.round(
       (amount / 100) * Number(state.rate.commission_iqd_per_100usd)
     );
     // Which way the fee points is the server's decision, travelling with the
@@ -1538,15 +1543,22 @@
     // rule that must not be able to disagree with apps/portal/pricing.
     var sign = Number(state.rate.commission_sign);
     if (sign !== -1) { sign = 1; }
-    var total = converted + sign * commission;
+
+    // Rounded to the nearest thousand dinars, in both directions. Odd figures
+    // arriving in a personal Iraqi wallet read as a business trading through a
+    // personal account, and that is what gets one frozen. The company wears the
+    // difference — at most 500 — and it comes out of the commission, so the
+    // conversion stays checkable against the published rate and the three lines
+    // still add up.
+    var total = Math.round((converted + sign * nominal) / TRANSFER_STEP) * TRANSFER_STEP;
+    var commission = sign * (total - converted);
 
     nodes.quoteConverted.textContent = iqd(converted);
     nodes.quoteCommission.textContent = iqd(commission);
     // A payout the commission swallowed is not a smaller withdrawal; the server
-    // refuses it, so there is no figure to show for it here either.
-    // A payout under one dinar is nothing; the server refuses it on the same
-    // threshold, so there is no figure to show for it here either.
-    nodes.quoteTotal.textContent = total >= 1 ? iqd(total) : "···";
+    // refuses it, so there is no figure to show for it here either. Rounded,
+    // a payout is either nothing or a whole step, so the threshold is the step.
+    nodes.quoteTotal.textContent = total >= TRANSFER_STEP ? iqd(total) : "···";
   }
 
   nodes.amount.addEventListener("input", function () {

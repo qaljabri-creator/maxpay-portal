@@ -1,0 +1,162 @@
+{
+  "_comment": "The rounding contract, pinned. apps/portal/pricing.price must produce these figures and static/js/flow.js must display them; each side has a test that reads this file, so neither can drift without failing. Regenerate only when the pricing rule itself changes, and say so in the commit.",
+  "iqd_per_usd": "1470.00",
+  "commission_iqd_per_100usd": "5000.00",
+  "transfer_step": 1000,
+  "cases": [
+    {
+      "direction": "deposit",
+      "amount_usd": "1.00",
+      "converted_iqd": "1470",
+      "commission_iqd": "530",
+      "total_iqd": "2000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "7.07",
+      "converted_iqd": "10393",
+      "commission_iqd": "607",
+      "total_iqd": "11000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "10.00",
+      "converted_iqd": "14700",
+      "commission_iqd": "300",
+      "total_iqd": "15000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "11.00",
+      "converted_iqd": "16170",
+      "commission_iqd": "830",
+      "total_iqd": "17000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "33.33",
+      "converted_iqd": "48995",
+      "commission_iqd": "2005",
+      "total_iqd": "51000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "50.00",
+      "converted_iqd": "73500",
+      "commission_iqd": "2500",
+      "total_iqd": "76000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "99.99",
+      "converted_iqd": "146985",
+      "commission_iqd": "5015",
+      "total_iqd": "152000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "100.00",
+      "converted_iqd": "147000",
+      "commission_iqd": "5000",
+      "total_iqd": "152000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "100.55",
+      "converted_iqd": "147809",
+      "commission_iqd": "5191",
+      "total_iqd": "153000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "1250.75",
+      "converted_iqd": "1838603",
+      "commission_iqd": "62397",
+      "total_iqd": "1901000"
+    },
+    {
+      "direction": "deposit",
+      "amount_usd": "9999.99",
+      "converted_iqd": "14699985",
+      "commission_iqd": "500015",
+      "total_iqd": "15200000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "1.00",
+      "converted_iqd": "1470",
+      "commission_iqd": "470",
+      "total_iqd": "1000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "7.07",
+      "converted_iqd": "10393",
+      "commission_iqd": "393",
+      "total_iqd": "10000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "10.00",
+      "converted_iqd": "14700",
+      "commission_iqd": "700",
+      "total_iqd": "14000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "11.00",
+      "converted_iqd": "16170",
+      "commission_iqd": "170",
+      "total_iqd": "16000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "33.33",
+      "converted_iqd": "48995",
+      "commission_iqd": "1995",
+      "total_iqd": "47000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "50.00",
+      "converted_iqd": "73500",
+      "commission_iqd": "2500",
+      "total_iqd": "71000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "99.99",
+      "converted_iqd": "146985",
+      "commission_iqd": "4985",
+      "total_iqd": "142000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "100.00",
+      "converted_iqd": "147000",
+      "commission_iqd": "5000",
+      "total_iqd": "142000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "100.55",
+      "converted_iqd": "147809",
+      "commission_iqd": "4809",
+      "total_iqd": "143000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "1250.75",
+      "converted_iqd": "1838603",
+      "commission_iqd": "62603",
+      "total_iqd": "1776000"
+    },
+    {
+      "direction": "withdrawal",
+      "amount_usd": "9999.99",
+      "converted_iqd": "14699985",
+      "commission_iqd": "499985",
+      "total_iqd": "14200000"
+    }
+  ]
+}

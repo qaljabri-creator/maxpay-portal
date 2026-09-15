@@ -5,8 +5,8 @@ The client enters **USD** in both directions — the amount that moves in their
 trading account — and is shown **IQD**. What differs is which way the
 commission points::
 
-    deposit     total_iqd = amount_usd × iqd_per_usd  +  commission
-    withdrawal  total_iqd = amount_usd × iqd_per_usd  −  commission
+    deposit     total_iqd = round1000(amount_usd × iqd_per_usd  +  commission)
+    withdrawal  total_iqd = round1000(amount_usd × iqd_per_usd  −  commission)
 
 with the commission prorated from the rate's ``commission_iqd_per_100usd``.
 The sign is the whole difference and it is not cosmetic: on a deposit the
@@ -14,6 +14,10 @@ client hands over the money, so the desk's fee is added to what they transfer;
 on a withdrawal the desk pays out, so the fee is deducted from what they
 receive. Added in both directions would charge the client on the way in and
 hand the fee back on the way out.
+
+The USD figure is whatever the client typed, to the cent. The dinar figure that
+moves is rounded to the nearest thousand — see :data:`TRANSFER_STEP` for why —
+and the company absorbs the difference through its own fee.
 
 ``Request.amount_iqd`` stores that *total* either way, because it is the number
 that actually moves between the client and the merchant, and therefore the only
@@ -52,6 +56,29 @@ CENT = Decimal("0.01")
 #: in the one module both the on-screen quote and the stored figures come from,
 #: is what stops the two from disagreeing about it.
 DINAR = Decimal("1")
+
+#: And the figure that actually moves is rounded again, to the nearest thousand
+#: dinars.
+#:
+#: This is an operational rule, not a cosmetic one. Every transfer in this
+#: system lands in a *personal* wallet or card in Iraq, and a personal account
+#: receiving 151,847 and 74,312 and 208,655 through the month does not look like
+#: a person being paid — it looks like a business trading through a personal
+#: account, which is what gets one frozen. Round thousands are what ordinary
+#: transfers between people look like.
+#:
+#: So it is rounded **here**, where the stored figures are computed, and not in
+#: a template filter: ``Request.amount_iqd`` is the number a merchant matches a
+#: receipt against, and the number a wallet's daily cap is measured in. A
+#: display-only rounding would put a figure on the client's screen that no
+#: receipt, and no cap, agrees with.
+#:
+#: The rounding is to the *nearest* thousand in both directions — deposit and
+#: withdrawal alike — so the gap is never more than 500 dinars, and it is the
+#: company that wears it: the conversion stays exactly ``amount × rate`` and the
+#: adjustment comes out of (or goes into) the commission, which is the only part
+#: of the total that is the company's own money.
+TRANSFER_STEP = Decimal("1000")
 
 #: Which rate governs which direction (spec §5).
 RATE_TYPE_FOR_REQUEST = {
@@ -227,6 +254,17 @@ class Quote:
         }
 
 
+def to_transfer_step(value: Decimal) -> Decimal:
+    """``value`` rounded to the nearest whole :data:`TRANSFER_STEP` of dinars.
+
+    Half-way rounds up, the same way :data:`DINAR` does, so there is exactly one
+    tie-breaking rule in the module and ``Math.round`` in ``static/js/flow.js``
+    mirrors it without a second convention to keep in step.
+    """
+    steps = (Decimal(value) / TRANSFER_STEP).quantize(DINAR, rounding=ROUND_HALF_UP)
+    return (steps * TRANSFER_STEP).quantize(DINAR)
+
+
 def price(
     iqd_per_usd: Decimal,
     commission_per_100: Decimal,
@@ -240,26 +278,40 @@ def price(
     the rate it was quoted on, and what a request stores is the pair of numbers,
     not a pointer to the row they came from (spec §5). One implementation, so a
     corrected request and a fresh one cannot be priced by two different rules.
+
+    The returned commission is the **effective** one: the nominal fee the rate
+    prorates, plus or minus whatever rounding the total to
+    :data:`TRANSFER_STEP` moved. That is the company absorbing the difference,
+    and it is also what keeps ``converted ± commission == total`` exactly —
+    which the client's breakdown and
+    :func:`apps.portal.payloads.converted_iqd` both reconstruct the conversion
+    by.
     """
     if request_type not in RATE_TYPE_FOR_REQUEST:
         raise PricingError("unknown_type", _("نوع طلب غير معروف."))
 
     amount = Decimal(amount_usd)
     converted = (amount * Decimal(iqd_per_usd)).quantize(DINAR, rounding=ROUND_HALF_UP)
-    commission = ((amount / Decimal("100")) * Decimal(commission_per_100)).quantize(
+    nominal = ((amount / Decimal("100")) * Decimal(commission_per_100)).quantize(
         DINAR, rounding=ROUND_HALF_UP
     )
 
     if request_type == RequestType.WITHDRAWAL:
-        total = converted - commission
-        if total < DINAR:
+        total = to_transfer_step(converted - nominal)
+        # A rounded payout is either nothing or at least one whole step, so this
+        # is the same refusal as before: nobody is paid zero, and a withdrawal
+        # that yields zero is not a smaller withdrawal, it is one the client
+        # would never have made.
+        if total < TRANSFER_STEP:
             raise PricingError(
                 "amount_below_commission",
                 _("العمولة (%(fee)s دينار) تستهلك المبلغ بالكامل. اسحب مبلغًا أكبر.")
-                % {"fee": f"{commission:,.0f}"},
+                % {"fee": f"{nominal:,.0f}"},
             )
+        commission = converted - total
     else:
-        total = converted + commission
+        total = to_transfer_step(converted + nominal)
+        commission = total - converted
 
     return converted, commission, total
 
@@ -267,11 +319,12 @@ def price(
 def quote(rate: ExchangeRate, amount_usd: Decimal, request_type: str) -> Quote:
     """Price ``amount_usd`` at ``rate``, in the direction ``request_type`` names.
 
-    Each component is rounded once, on its own, to the whole dinar, and the
-    total is built from the rounded pair — rather than rounding a single long
-    expression — so the three figures on screen always add up to the one the
-    client sees at the bottom. Rounding the total instead would leave a line
-    that does not add up, which on a receipt is worse than a lost dinar.
+    ``converted_iqd`` is exactly ``amount × rate``, rounded once to the whole
+    dinar — it is the figure a client can check against the published rate, so
+    nothing else is allowed to move it. ``total_iqd`` is then rounded to the
+    nearest :data:`TRANSFER_STEP`, and ``commission_iqd`` is whatever closes the
+    gap between the two. The three figures therefore still add up on screen,
+    which on a receipt matters more than a tidy fee.
 
     On a withdrawal the commission comes *off* the payout, and a commission that
     would leave nothing (or less than nothing) is a refusal rather than a clamp:

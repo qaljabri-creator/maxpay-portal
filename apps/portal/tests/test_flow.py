@@ -12,12 +12,14 @@ import datetime
 import json
 import time
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -346,16 +348,16 @@ class PricingTests(FlowTestCase):
                     self.assertEqual(figure, figure.to_integral_value(), figure)
 
     def test_the_three_figures_still_add_up_to_the_total(self):
-        """Each component is rounded on its own and the total built from the
-        rounded pair, so the line the client reads adds up. Rounding the total
-        instead would leave a receipt that does not."""
+        """The total is the rounded figure and the commission is what closes
+        the gap to it, so the line the client reads still adds up. A receipt
+        that does not add up is worse than an untidy fee."""
         quote = pricing.quote(self.rate, Decimal("33.33"), RequestType.DEPOSIT)
 
         self.assertEqual(
             quote.converted_iqd + quote.commission_iqd, quote.total_iqd
         )
 
-    def test_a_withdrawal_total_is_the_difference_of_the_rounded_pair(self):
+    def test_a_withdrawal_breakdown_subtracts_to_its_total(self):
         ExchangeRate.objects.create(
             rate_type=RateType.WITHDRAWAL,
             iqd_per_usd=Decimal("1470.00"),
@@ -419,6 +421,304 @@ class PricingTests(FlowTestCase):
         )
 
         self.assertEqual(pricing.current_rate("deposit").pk, self.rate.pk)
+
+
+class RoundThousandTests(FlowTestCase):
+    """The transferred dinar figure is rounded to the nearest thousand.
+
+    Finance, 15 Sep 2026, and the reason is not tidiness. Every one of these
+    transfers lands in a *personal* wallet or card in Iraq, and a personal
+    account taking 151,847 then 74,312 then 208,655 across a month does not
+    read as a person being paid — it reads as a business trading through a
+    personal account, which is how one gets frozen. Round thousands are what
+    transfers between people look like.
+
+    So the rule is: the dollar figure is whatever the client typed, the dinar
+    figure that moves is rounded to the nearest 1,000 in both directions, and
+    the company wears the difference.
+    """
+
+    #: Amounts whose raw totals land all over the place — above and below a
+    #: half-thousand, exactly on one, and on figures that were already round.
+    AMOUNTS = ("1.00", "7.07", "33.33", "50.00", "99.99", "100.55", "1250.75", "9999.99")
+
+    #: What :attr:`FlowTestCase.rate` prorates, for the cases that check how far
+    #: the fee actually taken drifted from it.
+    NOMINAL_PER_100 = Decimal("5000.00")
+
+    def withdrawal_rate(self, iqd_per_usd="1470.00", commission="5000.00"):
+        ExchangeRate.objects.create(
+            rate_type=RateType.WITHDRAWAL,
+            iqd_per_usd=Decimal(iqd_per_usd),
+            commission_iqd_per_100usd=Decimal(commission),
+        )
+        return pricing.current_rate(RequestType.WITHDRAWAL)
+
+    # -- the rule itself ---------------------------------------------------
+
+    def test_a_deposit_total_is_a_whole_thousand(self):
+        for amount in self.AMOUNTS:
+            with self.subTest(amount=amount):
+                quote = pricing.quote(self.rate, Decimal(amount), RequestType.DEPOSIT)
+                self.assertEqual(quote.total_iqd % 1000, 0, quote.total_iqd)
+
+    def test_a_withdrawal_total_is_a_whole_thousand_too(self):
+        """Both directions. A withdrawal is the one that actually *arrives* in
+        the client's personal account, so if only one direction were rounded it
+        would have to be this one."""
+        rate = self.withdrawal_rate()
+
+        for amount in self.AMOUNTS:
+            with self.subTest(amount=amount):
+                quote = pricing.quote(rate, Decimal(amount), RequestType.WITHDRAWAL)
+                self.assertEqual(quote.total_iqd % 1000, 0, quote.total_iqd)
+
+    def test_it_rounds_to_the_nearest_not_always_up(self):
+        """Nearest in both senses: a raw total below the half-thousand comes
+        down, one above it goes up. Always rounding up would quietly overcharge
+        every deposit, and always down would give the money away."""
+        # 10 × 1470 = 14,700, + 500 commission = 15,200 → down to 15,000.
+        down = pricing.quote(self.rate, Decimal("10.00"), RequestType.DEPOSIT)
+        self.assertEqual(down.converted_iqd, Decimal("14700"))
+        self.assertEqual(down.total_iqd, Decimal("15000"))
+
+        # 11 × 1470 = 16,170, + 550 commission = 16,720 → up to 17,000.
+        up = pricing.quote(self.rate, Decimal("11.00"), RequestType.DEPOSIT)
+        self.assertEqual(up.converted_iqd, Decimal("16170"))
+        self.assertEqual(up.total_iqd, Decimal("17000"))
+
+    def test_a_halfway_total_rounds_up(self):
+        """One tie-breaking rule in the codebase, and it is the one the whole-
+        dinar quantiser already used — so ``Math.round`` in flow.js agrees with
+        it for free."""
+        rate = ExchangeRate.objects.create(
+            rate_type=RateType.DEPOSIT,
+            iqd_per_usd=Decimal("1500.00"),
+            commission_iqd_per_100usd=Decimal("0.00"),
+        )
+
+        # 1.00 × 1500 = 1,500 exactly, with no commission to tip it either way.
+        quote = pricing.quote(rate, Decimal("1.00"), RequestType.DEPOSIT)
+
+        self.assertEqual(quote.converted_iqd, Decimal("1500"))
+        self.assertEqual(quote.total_iqd, Decimal("2000"))
+
+    # -- who pays for it ---------------------------------------------------
+
+    def test_the_dollar_amount_is_untouched(self):
+        """The client's trading balance moves by what they asked for. Rounding
+        that would be changing the amount, not tidying the transfer."""
+        quote = pricing.quote(self.rate, Decimal("100.55"), RequestType.DEPOSIT)
+
+        self.assertEqual(quote.amount_usd, Decimal("100.55"))
+
+    def test_the_conversion_line_is_still_exactly_amount_times_rate(self):
+        """It is the figure a client checks against the published rate, so the
+        rounding is not allowed to move it — the commission absorbs instead."""
+        quote = pricing.quote(self.rate, Decimal("100.55"), RequestType.DEPOSIT)
+
+        self.assertEqual(quote.converted_iqd, Decimal("147809"))
+        self.assertNotEqual(quote.converted_iqd % 1000, 0)
+
+    def test_the_company_wears_at_most_five_hundred_dinars(self):
+        """The gap between the fee the rate prorates and the fee actually taken
+        *is* the rounding, and nearest-thousand caps it at 500 either way."""
+        withdrawal = self.withdrawal_rate()
+
+        for direction, priced_at in (
+            (RequestType.DEPOSIT, self.rate),
+            (RequestType.WITHDRAWAL, withdrawal),
+        ):
+            for amount in self.AMOUNTS:
+                with self.subTest(direction=direction, amount=amount):
+                    quote = pricing.quote(priced_at, Decimal(amount), direction)
+                    nominal = (
+                        Decimal(amount) / 100 * self.NOMINAL_PER_100
+                    ).quantize(Decimal("1"))
+                    self.assertLessEqual(abs(quote.commission_iqd - nominal), 500)
+
+    def test_the_breakdown_still_adds_up_in_both_directions(self):
+        """Whatever the rounding did, the three lines on screen reconcile —
+        which is what :func:`apps.portal.payloads.converted_iqd` and the Finance
+        queue both reconstruct the conversion by."""
+        withdrawal = self.withdrawal_rate()
+
+        for amount in self.AMOUNTS:
+            with self.subTest(amount=amount, direction="deposit"):
+                q = pricing.quote(self.rate, Decimal(amount), RequestType.DEPOSIT)
+                self.assertEqual(q.converted_iqd + q.commission_iqd, q.total_iqd)
+            with self.subTest(amount=amount, direction="withdrawal"):
+                q = pricing.quote(withdrawal, Decimal(amount), RequestType.WITHDRAWAL)
+                self.assertEqual(q.converted_iqd - q.commission_iqd, q.total_iqd)
+
+    # -- stored, not merely displayed --------------------------------------
+
+    def test_the_stored_figure_is_the_rounded_one(self):
+        """The point of doing this in pricing rather than in a template filter.
+        ``amount_iqd`` is what a merchant matches the receipt against, and a
+        screen that rounded on its own would show a figure no receipt agrees
+        with."""
+        self.sign_in()
+
+        self.submit(amount_usd="100.55")
+
+        deposit = Request.objects.get()
+        self.assertEqual(deposit.amount_iqd, Decimal("153000.00"))
+        self.assertEqual(deposit.amount_usd, Decimal("100.55"))
+        self.assertEqual(deposit.commission_applied, Decimal("5191.00"))
+        self.assertEqual(
+            deposit.amount_iqd - deposit.commission_applied, Decimal("147809.00")
+        )
+
+    def test_what_the_client_was_quoted_is_what_was_stored(self):
+        """Live preview and submission come out of the same function, so the
+        confirmation cannot disagree with the screen the client accepted."""
+        self.sign_in()
+        quoted = pricing.quote(self.rate, Decimal("1250.75"), RequestType.DEPOSIT)
+
+        self.submit(amount_usd="1250.75")
+
+        deposit = Request.objects.get()
+        self.assertEqual(deposit.amount_iqd, quoted.total_iqd)
+        self.assertEqual(deposit.commission_applied, quoted.commission_iqd)
+
+    def test_the_daily_cap_is_measured_against_the_rounded_figure(self):
+        """The cap counts dinars into a wallet, and what goes into the wallet is
+        the rounded total — so that is what has to be measured against it, not
+        the figure before rounding."""
+        self.sign_in()
+        # $100.55 rounds up to 153,000 from a raw 153,000-. A cap a dinar under
+        # the rounded figure has to refuse it.
+        self.wallet.daily_cap = Decimal("152999.00")
+        self.wallet.save(update_fields=["daily_cap"])
+
+        response = self.submit(amount_usd="100.55")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.body(response)["error"], "wallet_cap_exceeded")
+
+    def test_a_cap_that_exactly_fits_the_rounded_figure_lets_it_through(self):
+        self.sign_in()
+        self.wallet.daily_cap = Decimal("153000.00")
+        self.wallet.save(update_fields=["daily_cap"])
+
+        response = self.submit(amount_usd="100.55")
+
+        self.assertEqual(response.status_code, 201, self.body(response))
+        self.assertEqual(Request.objects.get().amount_iqd, Decimal("153000.00"))
+
+    # -- the floor still holds ---------------------------------------------
+
+    def test_a_payout_that_rounds_away_to_nothing_is_refused(self):
+        """Rounded, a payout is either nothing or a whole thousand, and nothing
+        is a refusal rather than a smaller withdrawal."""
+        rate = self.withdrawal_rate(commission="146000.00")
+
+        with self.assertRaises(pricing.PricingError) as caught:
+            pricing.quote(rate, Decimal("1.00"), RequestType.WITHDRAWAL)
+
+        self.assertEqual(caught.exception.code, "amount_below_commission")
+
+    def test_the_smallest_payout_that_survives_is_a_whole_thousand(self):
+        # 1,470 converted, 600 of fee: a raw 870 that rounds up to one step.
+        rate = self.withdrawal_rate(commission="60000.00")
+
+        quote = pricing.quote(rate, Decimal("1.00"), RequestType.WITHDRAWAL)
+
+        self.assertEqual(quote.total_iqd, Decimal("1000"))
+
+
+class PricingContractTests(TestCase):
+    """``tests/pricing_cases.json``, from the Python side.
+
+    The live quote is computed in JavaScript and the stored figure in Python,
+    and the two are not allowed to disagree — a preview reading 152,000 against
+    a confirmation reading 151,847 is the desk taking a phone call. Neither
+    file can see the other, so both are held to one committed table:
+    ``tests/js/flow_quote.test.js`` asserts the shipped ``flow.js`` displays it,
+    and this class asserts :func:`apps.portal.pricing.price` produces it.
+
+    The table is also checked against the *rule* here, not merely against
+    whatever the code currently returns — otherwise regenerating it would
+    launder a bug into the contract.
+    """
+
+    CONTRACT = Path(settings.BASE_DIR) / "tests" / "pricing_cases.json"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        with open(cls.CONTRACT, encoding="utf-8") as handle:
+            cls.contract = json.load(handle)
+
+    def priced(self, case):
+        return pricing.price(
+            Decimal(self.contract["iqd_per_usd"]),
+            Decimal(self.contract["commission_iqd_per_100usd"]),
+            Decimal(case["amount_usd"]),
+            case["direction"],
+        )
+
+    def test_pricing_produces_the_table_case_for_case(self):
+        for case in self.contract["cases"]:
+            with self.subTest(**case):
+                converted, commission, total = self.priced(case)
+
+                self.assertEqual(converted, Decimal(case["converted_iqd"]))
+                self.assertEqual(commission, Decimal(case["commission_iqd"]))
+                self.assertEqual(total, Decimal(case["total_iqd"]))
+
+    def test_the_table_covers_both_directions(self):
+        """A table that only exercised deposits would let the withdrawal side
+        drift in silence, and the withdrawal is the one that lands in the
+        client's own account."""
+        directions = {case["direction"] for case in self.contract["cases"]}
+
+        self.assertEqual(directions, {"deposit", "withdrawal"})
+
+    # -- the table is checked against the rule, not just against the code ---
+
+    def test_every_total_in_the_table_is_a_whole_step(self):
+        step = Decimal(self.contract["transfer_step"])
+
+        for case in self.contract["cases"]:
+            with self.subTest(**case):
+                self.assertEqual(Decimal(case["total_iqd"]) % step, 0)
+
+    def test_every_conversion_in_the_table_is_exactly_amount_times_rate(self):
+        rate = Decimal(self.contract["iqd_per_usd"])
+
+        for case in self.contract["cases"]:
+            with self.subTest(**case):
+                expected = (Decimal(case["amount_usd"]) * rate).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+                self.assertEqual(Decimal(case["converted_iqd"]), expected)
+
+    def test_every_row_in_the_table_adds_up(self):
+        for case in self.contract["cases"]:
+            with self.subTest(**case):
+                converted = Decimal(case["converted_iqd"])
+                commission = Decimal(case["commission_iqd"])
+                sign = -1 if case["direction"] == "withdrawal" else 1
+
+                self.assertEqual(
+                    converted + sign * commission, Decimal(case["total_iqd"])
+                )
+
+    def test_no_row_moves_the_fee_by_more_than_half_a_step(self):
+        """Which is the company's side of the bargain, stated as a number."""
+        per_100 = Decimal(self.contract["commission_iqd_per_100usd"])
+        half_step = Decimal(self.contract["transfer_step"]) / 2
+
+        for case in self.contract["cases"]:
+            with self.subTest(**case):
+                nominal = (Decimal(case["amount_usd"]) / 100 * per_100).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+                drift = abs(Decimal(case["commission_iqd"]) - nominal)
+
+                self.assertLessEqual(drift, half_step)
 
 
 class WalletQrTests(FlowTestCase):

@@ -83,11 +83,12 @@ PostgreSQL to hand you can run it against SQLite:
 DATABASE_URL=sqlite:///smoke.sqlite3 python manage.py test
 ```
 
-The fourth covers `static/js/embed.js` — the B2CORE handshake, which the
-Django suite cannot reach because it runs in the browser. It needs Node and
-nothing else: `tests/js/harness.js` fakes the narrow slice of the DOM that
-script touches, so there is no `node_modules` tree and no build step. See
-*The B2CORE embed*.
+The fourth covers the two scripts the Django suite cannot reach because they run
+in the browser: `static/js/embed.js`, the B2CORE handshake, and the live quote in
+`static/js/flow.js`. It needs Node and nothing else — `tests/js/harness.js` and
+`tests/js/flow_harness.js` each fake the narrow slice of the DOM their script
+touches, so there is no `node_modules` tree and no build step. See *The B2CORE
+embed* and *And the transferred figure is rounded to the nearest 1,000*.
 
 That is a smoke-test convenience only. **CI and every shared environment must
 run PostgreSQL**, which is the database the spec targets. On Windows, set
@@ -1849,14 +1850,54 @@ rounding it would change every conversion computed from it.
 
 **Where it is applied.** `apps/portal/pricing.py` quantises to the whole dinar,
 and that one module backs both the quote on screen and the figures written at
-submission — which is what stops the two from disagreeing. Each component is
-rounded on its own and the total built from the rounded pair, so the three lines
-the client reads still add up to the one at the bottom; rounding the total
-instead would leave a receipt that does not.
+submission — which is what stops the two from disagreeing.
 
 `static/js/flow.js` rounds the same way in the same order, because it draws the
 live preview and a preview that rounded differently would show a figure the
 submission then contradicts.
+
+### And the transferred figure is rounded to the nearest 1,000
+
+Finance, 15 September 2026, and this one is not about denominations at all.
+
+Every transfer in this system lands in a **personal** wallet or card in Iraq.
+A personal account taking 151,847 then 74,312 then 208,655 across a month does
+not read as a person being paid; it reads as a business trading through a
+personal account, and that is what gets one frozen. Round thousands are what
+ordinary transfers between people look like, so that is what these are.
+
+| | |
+| --- | --- |
+| **USD** | exactly what the client typed — untouched |
+| **The transferred IQD** | rounded to the nearest 1,000, both directions |
+| **The gap (≤ 500)** | the company's, taken out of its own commission |
+
+To the *nearest*, not up: always rounding up would quietly overcharge every
+deposit and always down would give money away. And in both directions, deposit
+and withdrawal alike — the withdrawal is the one that actually arrives in the
+client's own account, so if only one were rounded it would have to be that one.
+
+**Who pays for it.** The conversion line stays exactly `amount × rate`, because
+that is the figure a client checks against the published rate and nothing is
+allowed to move it. The adjustment comes out of the commission instead, which is
+the only part of the total that is the company's own money. So the three lines
+still add up — `converted ± commission == total` — which `payloads.converted_iqd`
+and the Finance queue both reconstruct the conversion by.
+
+**It is stored, not formatted.** `Request.amount_iqd` holds the rounded figure,
+because it is the number a merchant matches the receipt against and the number
+`Wallet.daily_cap` is measured in. A template filter that rounded on the way to
+the screen would put a figure in front of the client that no receipt and no cap
+agrees with. Corrections go through the same `pricing.price`, so a corrected
+request is no less round than a fresh one.
+
+**How the two implementations are held together.** `tests/pricing_cases.json` is
+a committed table of 22 cases across both directions.
+`apps/portal/tests/test_flow.py::PricingContractTests` asserts `pricing.price`
+produces it and that the table itself obeys the rule;
+`tests/js/flow_quote.test.js` boots the real `flow.js` against a fake DOM and
+asserts the quote it paints matches the same table. Either side drifting fails
+its own test, and the table says which one is wrong.
 
 **Display shows up to two places and hides them when zero.** Not exactly zero
 places: a request settled *before* this rule may hold a real half-dinar, and
