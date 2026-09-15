@@ -1,0 +1,167 @@
+/* =========================================================================
+   MaxPay — the B2CORE palette, for the two internal panels
+   -------------------------------------------------------------------------
+   Finance and the merchant panel are now painted in B2CORE's official tokens
+   rather than the product's own black-and-cyan. The reason is the merchant
+   panel: it is going to be embedded inside the B2CORE room, and a panel that
+   is a different colour from the room it sits in reads as a foreign object
+   pasted into the page. Finance follows it because the two panels are one
+   tool family — a desk that runs both should not find the greys moving
+   underneath it when it switches tab.
+
+   **Where this sits in the load order.** `templates/base.html` loads
+   `system.css` first and then this file, before the surface sheet:
+
+     system.css        the typeface, the reset, and the old palette
+     panel-tokens.css  this file — overrides the palette, nothing else
+     portal.css        Finance components
+     merchant.css      merchant components
+
+   So this file is an *override layer*, not a replacement: system.css keeps
+   carrying `--font` and the two reset rules, and both panels keep loading it.
+   The client portal does **not** load this file, which is deliberate — see the
+   note at the bottom.
+
+   **One file, not two blocks.** Both panels use the identical fifteen colour
+   tokens, so the palette is declared once here rather than restated at the top
+   of `portal.css` and again at the top of `merchant.css`. Two copies of a
+   palette is two copies that drift, and the surface that drifts is the one
+   nobody happened to open that week.
+
+   Metrics are **not** here. `--radius`, `--tap` and `--rail-w` stay in the
+   surface sheets, because a desk tool and a framed phone surface disagree
+   about them on purpose and always have.
+   ========================================================================= */
+
+/* --- dark, the default ---------------------------------------------------
+   Dark stays the default because that is what these panels are today and
+   nothing on the server writes a theme attribute for them. The light cut
+   below is declared and ready: the moment the merchant panel is framed and
+   the host announces `embed-theme-change`, the same `data-theme` attribute
+   the client portal already honours switches this surface too, with no
+   further CSS.
+
+   That is the opposite default from `embed.css`, and deliberately so. The
+   portal is light-until-told-otherwise because it is *born* inside someone
+   else's room and light is the safer guess before the host speaks. These
+   panels are dark-until-told-otherwise because they are dark today and a
+   deploy that silently turned the Finance desk white would be a surprise
+   nobody asked for.
+
+   No `prefers-color-scheme` here either, for the reason embed.css gives: the
+   room decides, not the operating system.
+
+   Six of these fifteen are B2CORE's, quoted exactly and marked. The other
+   nine are derived, because B2CORE's set has one ground, one card, one line
+   and two inks, and these sheets have been built for three of each since
+   step 3. Every derived value is a step inside the range B2CORE's own two
+   endpoints establish — none of them introduces a hue that is not already
+   here. */
+:root {
+  --bg:        #171f2b;  /* B2CORE --page */
+  --surface:   #1f2a3c;  /* B2CORE --card */
+  /* One step above the card, for a hovered row and an inset well. The step is
+     small on purpose: it has to read as a lift without becoming a third
+     distinct ground the eye has to account for. */
+  --surface-2: #243044;
+
+  --line:   #324462;     /* B2CORE --line */
+  /* The line that has to be seen rather than merely obeyed — a table edge, an
+     input border, the QR plate's frame. */
+  --line-2: #425879;
+
+  --ink:   #ffffff;      /* B2CORE --ink */
+  --ink-2: #7b8aa4;      /* B2CORE --ink-2 */
+  /* Metadata: a breadcrumb, a rail group heading, a role label, help text.
+     See the contrast note below — this is the one token the B2CORE set does
+     not have an opinion about and the one that pays for the lighter ground. */
+  --ink-3: #6e7d96;
+
+  --accent: #1ae7ef;     /* B2CORE --accent */
+  /* Near-black from this palette's own family rather than pure, so a filled
+     accent block does not vibrate. 12.07:1 against the fill. */
+  --accent-ink:  #08151e;
+  --accent-wash: rgba(26, 231, 239, .09);
+  --accent-edge: rgba(26, 231, 239, .34);
+  /* A whole table row is a lot of area for a tint, so it gets a weaker one
+     than a chip does and leans on its edge marker instead. */
+  --accent-row:  rgba(26, 231, 239, .05);
+
+  /* Reserved strictly for errors, rejection and a failed login. B2CORE's set
+     names no error colour, so the product's own is kept — it was calibrated
+     against black and still clears AA on this lighter slate (5.43:1 on the
+     page, 4.73:1 on a card). The accent cannot say "this went wrong" while it
+     is also saying "press this". */
+  --danger:      #ff5b57;
+  --danger-wash: rgba(255, 91, 87, .11);
+}
+
+/* --- light ---------------------------------------------------------------
+   Stated as an explicit `data-theme="light"` rather than as "anything that is
+   not dark", so that a page with no attribute — which is every panel page
+   today — keeps the dark values above rather than falling through to these.
+
+   Every one of the fifteen is restated. A partial fork is a trap: the first
+   rule that reaches for a token nobody remembered gets a dark-ground value on
+   a white card, and nobody sees it until it ships. */
+:root[data-theme="light"] {
+  --bg:        #f5f7fa;  /* B2CORE --page */
+  --surface:   #ffffff;  /* B2CORE --card */
+  /* Below the card rather than above it: on a white ground a well is what
+     reads as raised-from, and a lift has nowhere left to go. */
+  --surface-2: #edf1f6;
+
+  --line:   #dce3ec;     /* B2CORE --line */
+  --line-2: #c3cedd;
+
+  --ink:   #16202e;      /* B2CORE --ink */
+  --ink-2: #5a6b85;      /* B2CORE --ink-2 */
+  --ink-3: #6c7c94;
+
+  --accent: #0a9098;     /* B2CORE --accent */
+  /* Near-black, not white. Measured both: white lands at 3.85:1 on this fill
+     and the palette's own ink at 4.26:1, so the darker label is the better of
+     the two. It is also the same rule the dark cut follows — whatever the
+     fill is, the label on top is the far end of the scale. */
+  --accent-ink:  #16202e;
+  --accent-wash: rgba(10, 144, 152, .08);
+  --accent-edge: rgba(10, 144, 152, .38);
+  --accent-row:  rgba(10, 144, 152, .05);
+
+  /* Held to the same reading as the dark cut: #ff5b57 is calibrated for a
+     dark ground and disappears on white. */
+  --danger:      #c62f2b;
+  --danger-wash: rgba(198, 47, 43, .10);
+}
+
+/* Symmetry, so an explicit `data-theme="dark"` from a host is not a selector
+   that matches nothing. It resolves to the same values as the bare `:root`
+   block above; restating them is what the fork rule forbids, so it is written
+   as the absence of the light block instead — which is exactly what it is. */
+
+/* =========================================================================
+   Two things this file does not do, and why
+   -------------------------------------------------------------------------
+   **It does not touch the client portal.** `templates/portal/base.html` loads
+   system.css + embed.css + flow.css and never reaches this file, so the client
+   surface is still on #19FFFD over black, with embed.css's own light cut at
+   #0A7472. That is a real difference from the two panels as of this commit and
+   it is not an oversight: bringing the portal across is a change to the screen
+   clients actually look at, and it was not part of this one. Whoever does it
+   should move these two blocks into system.css and delete embed.css's light
+   fork, rather than adding a third copy.
+
+   **It does not reach the two ink levels B2CORE does not define.** `--ink-3`
+   is ours, and on this palette it is the token that costs something. On the
+   old near-black ground a third ink still cleared AA; on #171F2B there is far
+   less room below `--ink-2` before a value stops being readable at all. It
+   lands at 3.97:1 on the page and 3.46:1 on a card — enough for the metadata
+   it carries, short of AA for body text. Nothing sets body copy in it, and
+   nothing should start.
+
+   Two of B2CORE's own tokens carry the same caveat and are quoted anyway,
+   because quoting them is the point of this file: `--ink-2` is 4.13:1 on a
+   card in dark, and `--accent` as *text* is 3.85:1 on white in light. Both are
+   AA-large rather than AA. If B2CORE revises either, this file is the one
+   place that changes.
+   ========================================================================= */

@@ -1,32 +1,47 @@
 /* =========================================================================
    MaxPay — the shared foundation
    -------------------------------------------------------------------------
-   Three surfaces, one identity. This file is the part of it that must not be
-   allowed to differ between them:
+   Three surfaces. This file carries the typeface, the two reset rules every
+   surface states identically, and the product's original palette:
 
      black ground, one accent (#19FFFD), Cairo, dark only, Arabic RTL.
 
-   It carries the palette, the typeface, and the two reset rules every surface
-   states identically. Nothing else. It has no components in it, because a
-   component belongs to the surface that uses it, and a file that grows
-   components is a file every surface has to load in full.
+   Nothing else. It has no components in it, because a component belongs to the
+   surface that uses it, and a file that grows components is a file every
+   surface has to load in full.
+
+   **The palette below is no longer shared by all three.** The two internal
+   panels are painted in B2CORE's official tokens now, because the merchant
+   panel is being framed inside the B2CORE room and had to stop being a
+   different colour from it. They load `panel-tokens.css` directly after this
+   file, which overrides every colour token here and nothing else — so what
+   this file still guarantees across all three surfaces is the typeface and the
+   reset, and what it *supplies* is the client portal's palette plus a fallback
+   the panels immediately replace.
+
+   That split is a waypoint, not a destination: if the client portal is brought
+   onto B2CORE's tokens too, the right move is to fold `panel-tokens.css` back
+   into this block and delete it, rather than to leave two palettes in the tree
+   permanently.
 
    It is loaded *before* the surface sheet on every page:
 
-     templates/base.html          system.css + portal.css   (Finance, 403, 2FA)
-     templates/merchant/base.html system.css + merchant.css
+     templates/base.html          system.css + panel-tokens.css + portal.css
+                                                        (Finance, 403, 2FA)
+     templates/merchant/base.html system.css + panel-tokens.css + merchant.css
      templates/portal/base.html   system.css + embed.css + flow.css
 
-   Two link tags rather than an `@import`: links are discovered together and
+   Link tags rather than an `@import`: links are discovered together and
    fetched in parallel, an import is discovered only after the importing sheet
-   has arrived and serialises the two.
+   has arrived and serialises them.
 
-   **Metrics deliberately stay out of here.** `--radius`, `--tap` and
-   `--rail-w` are surface decisions, not identity ones: the client portal is a
-   phone surface framed inside someone else's page and wants a 48px target and
-   a softer corner; the panels are desk tools that fit more on a screen. Each
-   sheet declares its own, and the split is the point — what is shared is
-   shared, and what is a judgement call is made where it is judged.
+   **Metrics deliberately stay out of here.** `--radius`, `--tap`, Finance's
+   `--rail-w` and the merchant panel's `--frame` are surface decisions, not
+   identity ones: the client portal is a phone surface framed inside someone
+   else's page and wants a 48px target and a softer corner; the panels are desk
+   tools that fit more on a screen, and only one of them still has a rail to
+   measure. Each sheet declares its own, and the split is the point — what is
+   shared is shared, and what is a judgement call is made where it is judged.
 
    Self-contained: the webfont is served from this origin, because every
    surface ships `default-src 'self'` (spec §11). No CDN, no third-party

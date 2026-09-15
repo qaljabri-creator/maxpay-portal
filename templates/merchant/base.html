@@ -2,10 +2,29 @@
 {% load static i18n %}
 
 {% comment %}The merchant's shell. It no longer shares the Finance panel's
-sheet: the two panels are different tools for different desks, and this one is
-built on the product identity that the client portal uses. It shares nothing
-else either, and never did: there is no client section in the rail because
-there is no client anywhere in this panel's data (spec §2).{% endcomment %}
+sheet: the two panels are different tools for different desks. What it does
+share with Finance now is the palette, in static/css/panel-tokens.css — both
+panels are painted in B2CORE's tokens, and as of that change it is the client
+portal rather than Finance that this surface differs from. It shares nothing
+else, and never did: there is no client section in the navigation because there
+is no client anywhere in this panel's data (spec §2).
+
+**Why this is a bar and not a rail.** This panel is going to be framed inside
+the B2CORE room, and that room has a vertical sidebar of its own. A second one
+does not sit beside the first — it stacks against it, and the two together eat
+most of the width on the only axis a queue of figures actually needs. So the
+three destinations run across the top in one line instead, above the work
+rather than beside it.
+
+One line at every width, and no hamburger: there are three destinations, their
+labels are short, and a menu that has to be opened to find out what is in it is
+a worse trade than a bar that scrolls in the rare case it has to.
+
+The brand block is gone with the rail. Inside the room, the mark above this
+frame is already B2CORE's and the one below it was already ours — repeating it
+was the same duplication the sidebar was. What did not go is the merchant's own
+name and the security link: the room does not carry either, and the second is
+the only way into 2FA enrolment from this panel.{% endcomment %}
 
 {% block stylesheet %}<link rel="stylesheet" href="{% static 'css/merchant.css' %}">{% endblock %}
 
@@ -13,46 +32,42 @@ there is no client anywhere in this panel's data (spec §2).{% endcomment %}
 
 {% block body %}
 <div class="shell">
-  <aside class="rail">
-    <div class="rail__brand">
-      <a href="{% url 'merchant_panel:queue' %}" class="rail__mark">{% trans "MaxPay" %}</a>
-      <span class="rail__sub">{% trans "لوحة التاجر" %}</span>
+  {% comment %}`aria-label` because there is a second nav on most of these
+  screens — the queue's status tabs — and "navigation" twice in a landmark
+  list tells a screen-reader user nothing about which is which.{% endcomment %}
+  <nav class="navbar" aria-label="{% trans 'أقسام لوحة التاجر' %}">
+    <a class="navbar__tab {% if nav_section == 'requests' %}is-active{% endif %}"
+       href="{% url 'merchant_panel:queue' %}"
+       {% if nav_section == 'requests' %}aria-current="page"{% endif %}>
+      {% trans "الطلبات المُسندة" %}
+      {% comment %}Spec §10: a new assigned request appears without a page
+      refresh, with an unread badge. The first badge counts the work, the
+      second counts how much of it nobody has opened yet. Both are read by
+      static/js/panel.js through `data-pulse`, never by class.{% endcomment %}
+      <span class="navbar__badge" data-pulse="counts.awaiting_me"
+            data-pulse-hide-zero {% if not awaiting_me %}hidden{% endif %}>{{ awaiting_me }}</span>
+      <span class="navbar__badge navbar__badge--new" data-pulse="unread"
+            data-pulse-hide-zero hidden
+            title="{% trans 'جديد منذ آخر اطّلاعك' %}">0</span>
+    </a>
+
+    <a class="navbar__tab {% if nav_section == 'wallets' %}is-active{% endif %}"
+       href="{% url 'merchant_panel:wallets' %}"
+       {% if nav_section == 'wallets' %}aria-current="page"{% endif %}>
+      {% trans "محافظي" %}
+    </a>
+
+    <a class="navbar__tab {% if nav_section == 'reports' %}is-active{% endif %}"
+       href="{% url 'merchant_panel:report' %}"
+       {% if nav_section == 'reports' %}aria-current="page"{% endif %}>
+      {% trans "التقارير" %}
+    </a>
+
+    <div class="navbar__end">
+      <span class="navbar__user">{{ merchant_name }}</span>
+      <a class="navbar__link" href="{% url 'two_factor:profile' %}">{% trans "الأمان" %}</a>
     </div>
-
-    <nav class="rail__nav">
-      <div class="rail__group">{% trans "العمل" %}</div>
-      <a class="rail__link {% if nav_section == 'requests' %}is-active{% endif %}"
-         href="{% url 'merchant_panel:queue' %}">
-        {% trans "الطلبات المُسندة" %}
-        {% comment %}Spec §10: a new assigned request appears without a page
-        refresh, with an unread badge. The first badge counts the work, the
-        second counts how much of it nobody has opened yet.{% endcomment %}
-        <span class="rail__badge" data-pulse="counts.awaiting_me"
-              data-pulse-hide-zero {% if not awaiting_me %}hidden{% endif %}>{{ awaiting_me }}</span>
-        <span class="rail__badge rail__badge--new" data-pulse="unread"
-              data-pulse-hide-zero hidden
-              title="{% trans 'جديد منذ آخر اطّلاعك' %}">0</span>
-      </a>
-
-      <div class="rail__group">{% trans "حسابي" %}</div>
-      <a class="rail__link {% if nav_section == 'wallets' %}is-active{% endif %}"
-         href="{% url 'merchant_panel:wallets' %}">
-        {% trans "محافظي" %}
-      </a>
-      <a class="rail__link {% if nav_section == 'reports' %}is-active{% endif %}"
-         href="{% url 'merchant_panel:report' %}">
-        {% trans "التقارير" %}
-      </a>
-    </nav>
-
-    <div class="rail__foot">
-      <span class="rail__user">{{ merchant_name }}</span>
-      <span class="rail__role">{% trans "تاجر" %}</span>
-      <div class="rail__links">
-        <a href="{% url 'two_factor:profile' %}">{% trans "الأمان" %}</a>
-      </div>
-    </div>
-  </aside>
+  </nav>
 
   <div class="main">
     <header class="topbar">

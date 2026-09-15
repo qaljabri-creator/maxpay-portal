@@ -5,7 +5,8 @@ finance_admin does, and both arrive by the same route, which is
 :class:`apps.accounts.middleware.ForcePasswordChangeMiddleware` refusing to
 serve them anything else until the one-time password they were issued is gone.
 
-It is also reachable voluntarily, from the "الأمان" link in either panel's rail,
+It is also reachable voluntarily, from the "الأمان" link both panels carry —
+Finance in its rail, the merchant panel at the end of its navigation bar —
 because an account whose password a colleague once read over a phone call should
 not have to wait for an administrator to reset it before it can be changed.
 """

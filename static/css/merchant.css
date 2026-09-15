@@ -7,22 +7,34 @@
    run down, figures that line up, and no ornament between the operator and
    the work.
 
-   The identity, fixed and shared with the client portal:
+   The identity, fixed and now shared with the Finance panel rather than with
+   the client portal:
 
-     black ground, one accent (#19FFFD), Cairo, dark only, Arabic RTL,
-     mobile first. No gradient anywhere, no second brand hue, no ornament.
+     B2CORE's ground, B2CORE's one accent, Cairo, Arabic RTL, mobile first.
+     No gradient anywhere, no second brand hue, no ornament.
+
+   The colours themselves are in static/css/panel-tokens.css, which both panels
+   load between system.css and this sheet. They are B2CORE's official tokens
+   rather than the product's old black-and-cyan, because the merchant panel is
+   going to be framed inside the B2CORE room and a panel that is a different
+   colour from the room it sits in reads as a foreign object. Nothing below
+   names a colour; every rule spends a token, which is why the repaint was a
+   new file rather than a pass over these two.
 
    How the accent is spent. On a queue this matters more than anywhere else:
    colour a whole table and the operator has to read all of it, every time.
 
-     fill   what is waiting on this merchant right now — the rail badge, the
-            "بانتظارك" flag, the primary action button. Nothing else fills.
-     edge   where they are and what they are working on — the active rail
-            link, the active tab, an unread row, the assigned pip.
+     fill   what is waiting on this merchant right now — the navigation
+            badge, the "بانتظارك" flag, the primary action button. Nothing
+            else fills.
+     edge   where they are and what they are working on — the active
+            navigation tab, the active in-page tab, an unread row, the
+            assigned pip.
      text   the values they act on: a reference, a wallet number, a figure.
 
    Status is otherwise carried by three weights of grey, not by a rainbow. A
-   pip that is merely a fact stays quiet; a pip that is a summons is cyan.
+   pip that is merely a fact stays quiet; a pip that is a summons carries the
+   accent.
 
    Spec §2 shows up here as a design constraint, not just a serializer one:
    there is no client anywhere in this panel, so there is no place in this
@@ -32,16 +44,18 @@
    rejection and failed validation. The accent already means "act on this" and
    cannot also mean "this went wrong".
 
-   The palette, the typeface and the reset are in static/css/system.css, which
-   every page here loads first; what is below is this panel alone. Self-contained
-   either way: the panels ship `default-src 'self'` (spec §11), so there is no
-   CDN and no third-party request anywhere.
+   The typeface and the reset are in static/css/system.css and the palette is
+   in static/css/panel-tokens.css, both of which every page here loads first;
+   what is below is this panel alone. Self-contained either way: the panels ship
+   `default-src 'self'` (spec §11), so there is no CDN and no third-party
+   request anywhere.
    ========================================================================= */
 
-/* The palette, the typeface and the reset live in system.css, which every
-   surface loads first. What stays here is this panel's own measure: a desk
-   tool fits more on a screen than a framed phone surface does, so the corners
-   are tighter and the target is a mouse target that a thumb still clears. */
+/* The typeface and the reset are in system.css and the palette is in
+   panel-tokens.css, both of which every page here loads first. What stays here
+   is this panel's own measure: a desk tool fits more on a screen than a framed
+   phone surface does, so the corners are tighter and the target is a mouse
+   target that a thumb still clears. */
 :root {
   --radius:    12px;
   --radius-sm: 9px;
@@ -50,7 +64,12 @@
      payment on a phone gets the same target as one doing it at a desk. */
   --tap: 2.75rem;
 
-  --rail-w: 15.5rem;
+  /* The page ground left showing around the navigation bar, and the inline
+     padding every other block lines up with. One value, because the gap that
+     separates the bar from the host's chrome and the gutter the content sits
+     in are the same measurement seen twice — letting them drift is how a bar
+     ends up looking bolted on rather than part of the page below it. */
+  --frame: 1.1rem;
 }
 
 body {
@@ -130,122 +149,165 @@ h3 { font-size: .95rem; }
 /* =========================================================================
    Shell
    -------------------------------------------------------------------------
-   Mobile first, and inverted from the old desktop-first rule: the rail starts
-   as a strip across the top, because that is what fits a phone, and only
-   becomes a column once there is a screen wide enough to spare 15rem of it.
+   One column, at every width. The rail that used to run down the side is a
+   bar across the top now, because this panel is framed inside the B2CORE room
+   and that room already has a sidebar: a second one does not sit beside the
+   first, it stacks against it, and between them they take the width a queue of
+   figures is the one thing that needs.
+
+   The bar is one line and stays one line on a phone. Three destinations with
+   short labels do not earn a menu, and a menu that has to be opened before it
+   will say what is in it is a worse trade than a bar that scrolls in the rare
+   case it has to. So: `nowrap` always, and `overflow-x` as the release valve
+   rather than a second row.
    ========================================================================= */
 
-.shell { display: flex; flex-direction: column; min-height: 100vh; }
-
-.rail {
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+.shell {
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
 }
 
-.rail__brand {
+/* --- the bar, and the gap that keeps it off the host's chrome -------------
+   Spec §4 puts this panel inside B2CORE's page, directly under whatever header
+   that room paints. A bar that runs edge to edge and starts at y=0 reads as the
+   second row of *that* header rather than as the top of this panel, and a
+   merchant who reads it that way looks for their queue in the wrong place.
+
+   Two things separate it, because either alone is weak:
+
+     *space*  — `--frame` of page ground on all four sides, so the bar is
+                visibly an object sitting on our ground rather than a band
+                welded to the top of the viewport.
+     *ground* — the bar is `--surface` on `--bg`, bordered and rounded. B2CORE
+                headers are painted in the room's own card colour, so a card
+                with a margin around it cannot be mistaken for a continuation
+                of one that is flush.
+
+   Not sticky. A sticky bar inside an iframe sticks to the *frame's* scroll,
+   not the room's, which on a short frame means it hovers over three rows of
+   queue and on a tall one never moves at all. The host scrolls the page; this
+   scrolls with it. */
+.navbar {
   display: flex;
-  align-items: baseline;
-  gap: .5rem;
-  padding: .9rem 1.1rem;
-  border-bottom: 1px solid var(--line);
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: .25rem;
+  margin: var(--frame) var(--frame) 0;
+  padding: .25rem .3rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  /* The bar scrolls only if it must; the scrollbar itself is noise on a
+     control this short, and its gutter would eat into the light height the
+     bar is supposed to have. */
+  scrollbar-width: none;
 }
+.navbar::-webkit-scrollbar { display: none; }
 
-.rail__mark {
-  color: var(--ink);
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: .02em;
-  text-decoration: none;
-  direction: ltr;
-}
-.rail__mark:hover { color: var(--accent); text-decoration: none; }
-
-.rail__sub { color: var(--ink-3); font-size: .78rem; }
-
-.rail__nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .3rem;
-  padding: .6rem .7rem;
-  flex: 1;
-}
-
-/* The group headings are a column's furniture. Across the top of a phone they
-   are just words in the way. */
-.rail__group { display: none; }
-
-.rail__link {
+/* Light height is the whole point of moving up here: the bar spends vertical
+   space that used to be free, so it spends as little as it can and still take
+   a thumb. `--tap` is 2.75rem and that is the floor, not the target — the
+   padding below is what a 15px label needs and no more. */
+.navbar__tab {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: .5rem;
+  gap: .45rem;
+  flex: none;
   min-height: var(--tap);
-  padding: .4rem .8rem;
+  padding: .3rem .85rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--ink-2);
   font-size: .88rem;
   font-weight: 600;
+  white-space: nowrap;
   text-decoration: none;
 }
 
-.rail__link:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
+.navbar__tab:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+  text-decoration: none;
+}
 
-.rail__link.is-active {
+/* Where you are, in the accent. This is the `edge` job the sheet header
+   describes, and on a bar it is the only one of the three that applies: a
+   filled tab would be the panel shouting its own navigation at a merchant who
+   came here to read a figure. */
+.navbar__tab.is-active {
   color: var(--accent);
   border-color: var(--accent-edge);
   background: var(--accent-wash);
 }
 
-.rail__foot {
-  padding: .8rem 1.1rem;
-  border-top: 1px solid var(--line);
-  font-size: .8rem;
-  color: var(--ink-3);
+/* Colour is not the only carrier. An underline under the active tab survives a
+   monochrome screen, a colour-blind reader and a printout, and on a row of
+   otherwise identical pills it is the thing the eye lands on first. */
+.navbar__tab.is-active::after {
+  content: "";
+  position: absolute;
+  inset-inline: .85rem;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 
-/* Across the top of a phone the foot is one line, because every row it
-   takes is a row of queue the merchant has to scroll past. In the column it
-   goes back to being stacked. */
-.rail__foot { display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem .7rem; }
-.rail__links { display: flex; gap: .7rem; }
+.navbar__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 
-.rail__user { color: var(--ink); font-weight: 700; }
-.rail__role { font-size: .74rem; letter-spacing: .05em; color: var(--ink-3); }
-.rail__foot a { color: var(--ink-2); }
-.rail__foot a:hover { color: var(--accent); }
+/* --- the trailing group --------------------------------------------------
+   Who is signed in, and the one link out of this panel. Pushed to the far end
+   so the three destinations stay a group the eye reads as one thing. It is
+   quiet on purpose: neither of these is a destination a merchant is looking
+   for while they work. */
+.navbar__end {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline: .6rem;
+  font-size: .8rem;
+  white-space: nowrap;
+}
 
-/* --- rail badges --------------------------------------------------------
+.navbar__user { color: var(--ink-2); font-weight: 700; }
+.navbar__link { color: var(--ink-3); text-decoration: none; }
+.navbar__link:hover { color: var(--accent); text-decoration: underline; }
+
+/* --- bar badges ----------------------------------------------------------
    Spec §10. The first badge counts the work; the second counts how much of it
    nobody has opened. Work waiting is the one thing on this panel that earns a
    filled accent, so the count fills and the "new" marker only outlines. */
 
-.rail__badge {
-  margin-inline-start: auto;
-  min-width: 1.5rem;
-  padding: 0 .4rem;
+.navbar__badge {
+  min-width: 1.4rem;
+  padding: 0 .35rem;
   border: 1px solid var(--accent);
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-ink);
-  font-size: .72rem;
+  font-size: .7rem;
   font-weight: 700;
   text-align: center;
-  line-height: 1.4rem;
+  line-height: 1.3rem;
   font-variant-numeric: tabular-nums;
   direction: ltr;
   unicode-bidi: isolate;
 }
 
-.rail__badge--new {
-  margin-inline-start: .3rem;
+.navbar__badge--new {
   background: transparent;
   color: var(--accent);
 }
 
-.rail__badge[hidden] { display: none; }
+.navbar__badge[hidden] { display: none; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
@@ -255,7 +317,7 @@ h3 { font-size: .95rem; }
   justify-content: space-between;
   flex-wrap: wrap;
   gap: .8rem;
-  padding: 1.1rem;
+  padding: 1.1rem var(--frame);
   border-bottom: 1px solid var(--line);
 }
 
@@ -272,58 +334,15 @@ h3 { font-size: .95rem; }
 .topbar__actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 
 .content {
-  padding: 1.1rem 1.1rem 3rem;
+  padding: 1.1rem var(--frame) 3rem;
   max-width: 84rem;
   width: 100%;
 }
 
+/* Only the measure opens up on a wide screen now. There is no layout switch
+   left to make: the bar is the same bar at 360px and at 1600px, which is what
+   "stays one line" was asking for. */
 @media (min-width: 60rem) {
-  .shell { flex-direction: row; }
-
-  .rail {
-    position: sticky;
-    top: 0;
-    align-self: flex-start;
-    flex: none;
-    width: var(--rail-w);
-    height: 100vh;
-    border-bottom: 0;
-    border-inline-end: 1px solid var(--line);
-  }
-
-  .rail__nav { flex-direction: column; flex-wrap: nowrap; gap: .15rem; overflow-y: auto; }
-
-  .rail__group {
-    display: block;
-    margin: 1rem .8rem .35rem;
-    font-size: .7rem;
-    letter-spacing: .12em;
-    color: var(--ink-3);
-  }
-
-  .rail__link { display: flex; }
-
-  .rail__foot { display: block; }
-  .rail__user { display: block; }
-  .rail__links { margin-top: .5rem; }
-
-  /* The active marker runs down the reading edge of the column, where the eye
-     already is. It replaces the tinted pill, which is a phone affordance. */
-  .rail__link.is-active {
-    background: var(--accent-wash);
-    border-color: transparent;
-  }
-  .rail__link.is-active::before {
-    content: "";
-    position: absolute;
-    inset-block: .35rem;
-    inset-inline-start: -.4rem;
-    width: 2px;
-    border-radius: 2px;
-    background: var(--accent);
-  }
-
-  .topbar, .content { padding-inline: 2rem; }
   .topbar { padding-block: 1.3rem; }
   .content { padding-block: 1.6rem 3.5rem; }
 }
@@ -1262,7 +1281,7 @@ ul.errorlist {
    ========================================================================= */
 
 @media print {
-  .rail, .topbar__actions, .actions, .btn { display: none !important; }
+  .navbar, .topbar__actions, .actions, .btn { display: none !important; }
   body { background: #fff; color: #000; }
   .panel { border-color: #999; background: #fff; }
 }

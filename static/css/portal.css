@@ -7,10 +7,19 @@
    who changed what. It is read for hours at a time, so it is dense, quiet, and
    built to be scanned rather than admired.
 
-   The identity, fixed and shared with the other two surfaces:
+   The identity, fixed and now shared with the merchant panel rather than with
+   all three surfaces:
 
-     black ground, one accent (#19FFFD), Cairo, dark only, Arabic RTL,
-     mobile first. No gradient anywhere, no second brand hue, no ornament.
+     B2CORE's ground, B2CORE's one accent, Cairo, Arabic RTL, mobile first.
+     No gradient anywhere, no second brand hue, no ornament.
+
+   The colours themselves are in static/css/panel-tokens.css, which both panels
+   load between system.css and this sheet. They are B2CORE's official tokens
+   rather than the product's old black-and-cyan, because the merchant panel is
+   going to be framed inside the B2CORE room and a panel that is a different
+   colour from the room it sits in reads as a foreign object. Nothing below
+   names a colour; every rule spends a token, which is why the repaint was a
+   new file rather than a pass over these two.
 
    How the accent is spent. This panel has more to say than the other two, so
    the rule has to be stricter, not looser:
@@ -25,11 +34,11 @@
      text   the values the desk governs and acts on: a reference, a rate, a
             figure, a wallet number.
 
-   A request's status pip is cyan in exactly one panel at a time: the panel
-   whose desk it is currently sitting on. `assigned` is cyan for the merchant
-   and grey here; `submitted`, `under_review`, `merchant_confirmed` and
-   `merchant_paid` are cyan here and grey there. Scanning a queue for "mine"
-   is then the same gesture on both.
+   A request's status pip carries the accent in exactly one panel at a time:
+   the panel whose desk it is currently sitting on. `assigned` is accented for
+   the merchant and grey here; `submitted`, `under_review`,
+   `merchant_confirmed` and `merchant_paid` are accented here and grey there.
+   Scanning a queue for "mine" is then the same gesture on both.
 
    Everything else is three weights of grey. The one non-neutral besides the
    accent is the error red, reserved for rejection, failed validation and a

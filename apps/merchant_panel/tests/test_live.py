@@ -108,9 +108,12 @@ class QueueRowsTests(MerchantLiveTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.request_obj.public_ref)
-        # A fragment, not a page.
+        # A fragment, not a page. The second assertion names the shell's
+        # navigation specifically, because that is the piece a careless
+        # `{% extends %}` in the row template would drag in; it tracks the
+        # class the shell actually renders, or it stops asserting anything.
         self.assertNotContains(response, "<html")
-        self.assertNotContains(response, "rail__nav")
+        self.assertNotContains(response, "navbar__tab")
 
     def test_the_fragment_is_assigned_only(self):
         theirs = self.make_request(assigned_to=self.other)
