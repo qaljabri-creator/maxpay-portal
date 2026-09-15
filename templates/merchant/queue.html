@@ -1,9 +1,11 @@
 {% extends "merchant/base.html" %}
 {% load i18n merchant_fmt %}
 
-{# Every value on this page came out of MerchantRequestSummarySerializer. There
-   is no Request object in this template's context, so there is nothing here to
-   walk back to a client even by accident (spec §2). #}
+{% comment %}
+  Every value on this page came out of MerchantRequestSummarySerializer. There
+  is no Request object in this template's context, so there is nothing here to
+  walk back to a client even by accident (spec §2).
+{% endcomment %}
 
 {% block page_title %}{% trans "الطلبات المُسندة" %}{% endblock %}
 {% block crumb %}{% trans "العمل" %}{% endblock %}

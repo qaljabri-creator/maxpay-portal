@@ -290,9 +290,11 @@ view.{% endcomment %}
             <span id="quote-commission-label">{% trans "العمولة" %}</span>
             <span class="num" id="quote-commission" dir="ltr">···</span>
           </div>
-          {# What the company adds or takes off to land the transfer on a whole
-             thousand. Hidden whenever it is zero, which is most amounts — a row
-             reading "0" invites a question it has no answer to. #}
+          {% comment %}
+            What the company adds or takes off to land the transfer on a whole
+            thousand. Hidden whenever it is zero, which is most amounts — a row
+            reading "0" invites a question it has no answer to.
+          {% endcomment %}
           <div class="quote__row" id="quote-rounding-row" hidden>
             <span>{% trans "تقريب لأقرب ألف" %}</span>
             <span class="num" id="quote-rounding" dir="ltr">···</span>

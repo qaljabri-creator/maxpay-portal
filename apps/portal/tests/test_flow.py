@@ -10,6 +10,7 @@ here can pass with a session that the verification path would have refused.
 
 import datetime
 import json
+import re
 import time
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -1777,6 +1778,34 @@ class BootstrapPageTests(FlowTestCase):
             if 'type="application/json"' in head:
                 continue
             self.assertIn("src=", head, "an inline <script> appeared on the page")
+
+    def test_no_developer_prose_reaches_the_client(self):
+        """The deposit screen is Arabic, and everything on it is for a client.
+
+        A ``{# … #}`` comment that runs past its own line renders the rest of
+        itself to the page, and that is how an English note about the rounding
+        row came to be printed above it. ``apps/core/test_templates.py`` stops
+        the class of defect; this asserts the outcome on the one screen a client
+        actually reads.
+        """
+        page = self.client.get(self.bootstrap_url).content.decode("utf-8")
+
+        # Strip the two json_script islands: they are data, and legitimately
+        # carry English keys.
+        visible = re.sub(
+            r'<script[^>]*type="application/json"[^>]*>.*?</script>',
+            "",
+            page,
+            flags=re.DOTALL,
+        )
+        visible = re.sub(r"<script.*?</script>", "", visible, flags=re.DOTALL)
+        visible = re.sub(r"<style.*?</style>", "", visible, flags=re.DOTALL)
+        # What is left of the markup once the tags themselves are gone.
+        text = re.sub(r"<[^>]+>", " ", visible)
+
+        for phrase in ("the company", "Hidden whenever", "invites a question",
+                       "serializer", "spec §2", "template's context"):
+            self.assertNotIn(phrase, text, f"developer prose on the client page: {phrase}")
 
 
 # ---------------------------------------------------------------------------

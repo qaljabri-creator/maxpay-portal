@@ -97,14 +97,15 @@ Arabic, and the default console codepage cannot encode them — with
 `--parallel` this surfaces as an unrelated-looking pickling error rather than
 as the encoding failure it is.
 
-Three files in the suite are about the suite rather than about a feature, and
-are worth knowing before adding a route or a serializer:
+Four files in the suite are about the suite rather than about a feature, and
+are worth knowing before adding a route, a serializer or a template:
 
 | | |
 | --- | --- |
 | `apps/core/test_routes.py` | Walks the URLconf. Every route is public-with-a-reason, portal, or closed to anonymous callers — a new one that is none of those fails the build. |
 | `apps/merchant_panel/tests/test_api.py` | Enumerates the merchant URLconf and sweeps every response for client identity, by key and by value. A merchant route added without being listed fails. |
 | `apps/core/test_security.py` | The spec §11 promises: the audit log's triggers, one CSP per surface, and each deploy check firing on what it is for. |
+| `apps/core/test_templates.py` | Walks every template for a `{# … #}` comment that runs past its own line — Django's hash comment is single-line, and the rest of it renders to the page. Also keeps the global `[hidden]` rule in `system.css`. Both are defects that shipped more than once. |
 
 ---
 
@@ -1899,6 +1900,14 @@ kept beside the commission rather than inside it.
 that did not happen are not facts about a request, and a row reading `0 د.ع`
 only invites a question it has no answer to. Both the live quote and the request
 summary omit them.
+
+That took two goes. `flow.js` set `node.hidden = true` correctly and the
+JavaScript tests asserted it, and the row stayed on screen anyway: the user
+agent's `[hidden] { display: none }` is beaten by any author rule that sets
+`display`, and `.quote__row` is a flex row. It had been patched a component at a
+time up to then. `system.css` now carries
+`[hidden] { display: none !important }` once for every surface, and
+`apps/core/test_templates.py::HiddenAttributeTests` keeps it there.
 
 **Recovering the breakdown afterwards.** `payloads.converted_iqd` computes
 `amount_usd × rate_applied` rather than undoing the commission. Subtraction was

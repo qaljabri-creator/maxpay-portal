@@ -1,9 +1,11 @@
 {% extends "merchant/base.html" %}
 {% load i18n merchant_fmt %}
 
-{# `req` is a dictionary from MerchantRequestDetailSerializer, not a Request.
-   The masking spec §2 requires happened before this file was reached, and it is
-   the reason nothing here needs to remember to mask anything. #}
+{% comment %}
+  `req` is a dictionary from MerchantRequestDetailSerializer, not a Request.
+  The masking spec §2 requires happened before this file was reached, and it is
+  the reason nothing here needs to remember to mask anything.
+{% endcomment %}
 
 {% block page_title %}{{ req.reference }}{% endblock %}
 {% block crumb %}<a href="{% url 'merchant_panel:queue' %}">{% trans "الطلبات المُسندة" %}</a>{% endblock %}

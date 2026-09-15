@@ -117,6 +117,21 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* `hidden` means hidden, on every surface and whatever else a class says.
+
+   The user agent's `[hidden] { display: none }` loses to any author rule that
+   sets `display` — `.quote__row { display: flex }` is enough — so a script
+   setting `node.hidden = true` on a flex row hides nothing at all. That has now
+   been found in the wild more than once, each time patched with a per-component
+   `[hidden]` companion beside the offending rule. This states it once, for
+   everything, so the next component to be toggled does not have to remember.
+
+   `!important` is deliberate and is the whole point: it has to outrank author
+   rules, which is the thing the user agent's version cannot do. An element that
+   genuinely needs to stay laid out while hidden wants `visibility` or
+   `aria-hidden`, not this attribute. */
+[hidden] { display: none !important; }
+
 html {
   -webkit-text-size-adjust: 100%;
   background: var(--bg);

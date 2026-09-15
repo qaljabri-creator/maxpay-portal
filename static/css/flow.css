@@ -433,11 +433,16 @@
 }
 
 /* --- the details ----------------------------------------------------------
-   Shown only once all three columns are answered. `display` is set here, so
-   the `[hidden]` companion below is load-bearing rather than decorative: an
-   author rule beats the user agent's `[hidden] { display: none }` whatever its
-   specificity, and without it the details would sit under a half-empty row
-   quoting a rate for a request nobody is making. */
+   Shown only once all three columns are answered. `display` is set here, which
+   used to mean every toggled component needed an `[hidden]` companion of its
+   own: an author rule beats the user agent's `[hidden] { display: none }`
+   whatever its specificity, and without one the details would sit under a
+   half-empty row quoting a rate for a request nobody is making.
+
+   `system.css` now states `[hidden] { display: none !important }` once for
+   every surface, so a new component does not have to remember. The companions
+   in this file are kept as local documentation of which rules set `display`;
+   they are no longer what is holding the behaviour up. */
 
 .details {
   display: flex;
