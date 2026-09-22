@@ -12,6 +12,7 @@ completes" — the property a developer cares about, checked end to end through
 the real wizard.
 """
 
+import json
 import tempfile
 from binascii import unhexlify
 from datetime import datetime
@@ -19,6 +20,7 @@ from io import StringIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import jwt
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
@@ -29,8 +31,18 @@ from two_factor.utils import default_device
 
 from apps.accounts.models import User
 from apps.core import hours as business_hours
-from apps.core.management.commands.seed_demo import DEFAULT_PASSWORD, DEVICE_NAME
+from apps.core.management.commands.seed_demo import (
+    DEFAULT_PASSWORD,
+    DEMO_MERCHANT_NAME,
+    DEV_ISSUER,
+    DEVICE_NAME,
+    JWKS_PATH,
+    MERCHANT_SUBJECT,
+    MERCHANT_TOKEN_PATH,
+)
 from apps.core.models import SystemSettings
+from apps.merchants.models import Merchant
+from apps.portal.tests.support import StubbedJWKS
 
 
 class SeedDemoTestCase(TestCase):
@@ -156,6 +168,94 @@ class GuardTests(SeedDemoTestCase):
         with override_settings(DEBUG=False), self.assertRaises(CommandError):
             self.seed()
         self.assertFalse(User.objects.exists())
+
+
+class MerchantTokenTests(SeedDemoTestCase):
+    """``--merchant-token``: the demo merchant, bound and minted like a real one.
+
+    The interesting claim is not "a token was written" — it is that the token
+    this prints actually opens the panel, the same way a developer pasting the
+    console snippet would find out. ``test_the_minted_token_actually_opens_the_merchant_panel``
+    is that claim, driven through the real views rather than through
+    ``apps.merchant_panel.session`` directly, because a passing unit test and a
+    working local demo are two different things and only one of them is what
+    ``seed_demo`` promises.
+    """
+
+    def test_it_refuses_before_the_demo_merchant_exists(self):
+        with self.assertRaises(CommandError):
+            self.seed(merchant_token=True)
+        self.assertFalse(Merchant.objects.exists())
+
+    def test_it_binds_the_demo_merchant_to_a_demo_subject(self):
+        self.seed()
+        self.seed(merchant_token=True)
+
+        merchant = Merchant.objects.get(name=DEMO_MERCHANT_NAME)
+        self.assertEqual(merchant.b2core_id, MERCHANT_SUBJECT)
+
+    def test_the_minted_token_is_shaped_like_the_client_token(self):
+        """Same claim set as ``mint_token``'s, B2CORE mints one shape for everyone."""
+        self.seed()
+        self.seed(merchant_token=True)
+
+        token = (Path(self._tmp.name) / MERCHANT_TOKEN_PATH).read_text(encoding="utf-8")
+        claims = jwt.decode(token, options={"verify_signature": False})
+
+        self.assertEqual(claims["sub"], MERCHANT_SUBJECT)
+        self.assertEqual(claims["iss"], DEV_ISSUER)
+        self.assertNotIn("aud", claims)
+        self.assertIn("first_name", claims)
+        self.assertIn("last_name", claims)
+
+    def test_re_running_converges_rather_than_rebinding(self):
+        self.seed()
+        self.seed(merchant_token=True)
+        first_token = (Path(self._tmp.name) / MERCHANT_TOKEN_PATH).read_text(encoding="utf-8")
+
+        self.seed(merchant_token=True)
+
+        self.assertEqual(Merchant.objects.filter(b2core_id=MERCHANT_SUBJECT).count(), 1)
+        second_token = (Path(self._tmp.name) / MERCHANT_TOKEN_PATH).read_text(encoding="utf-8")
+        # A fresh token each run — only the binding converges, not the token.
+        self.assertNotEqual(first_token, second_token)
+
+    def test_the_minted_token_actually_opens_the_merchant_panel(self):
+        """The whole point: paste-ready means it actually works, unframed.
+
+        Drives exactly the loop ``report_merchant_token`` describes — POST the
+        token to the session endpoint from the page's own origin, then GET the
+        panel with the cookie that came back — with only the JWKS *fetch*
+        replaced, so the suite touches no network. Everything downstream of
+        that fetch, including the merchant binding in
+        ``apps.merchant_panel.session``, runs unmodified.
+        """
+        self.seed()
+        self.seed(merchant_token=True)
+
+        token = (Path(self._tmp.name) / MERCHANT_TOKEN_PATH).read_text(encoding="utf-8")
+        jwks_document = json.loads((Path(self._tmp.name) / JWKS_PATH).read_text(encoding="utf-8"))
+
+        with override_settings(
+            B2CORE_JWKS_URL="https://b2core.test/.well-known/jwks.json",
+            B2CORE_JWT_ISSUER=DEV_ISSUER,
+            B2CORE_JWT_AUDIENCE="",
+        ), StubbedJWKS(jwks_document):
+            response = self.client.post(
+                reverse("merchant_panel:session"),
+                data=json.dumps({"token": token}),
+                content_type="application/json",
+                # The Django test client's own origin — exactly what a fetch()
+                # from the page it just rendered would send.
+                HTTP_ORIGIN="http://testserver",
+            )
+            self.assertEqual(response.status_code, 201, response.content)
+            self.assertTrue(response.json()["authenticated"])
+
+            panel = self.client.get(reverse("merchant_panel:queue"))
+
+        self.assertEqual(panel.status_code, 200)
+        self.assertContains(panel, DEMO_MERCHANT_NAME)
 
 
 class BusinessHoursTests(SeedDemoTestCase):

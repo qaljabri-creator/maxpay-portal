@@ -59,6 +59,19 @@ genuinely checked against a genuine key set. Paste the printed settings into
 console exactly as B2CORE would. `--token-only` mints a fresh one when it
 expires.
 
+The merchant panel is framed by B2CORE too now, and reuses the same stand-in:
+`--merchant-token` binds the demo merchant to its own demo `b2core_id`, mints
+a token shaped identically to the client's, and prints the same paste-ready
+`fetch` — this time against `/merchant/session/`, opened from
+`/merchant/embed/` rather than `/merchant/` itself, since only the handshake
+page runs standalone. It needs two more lines in `.env`, for the same reason
+the client's does: `MERCHANT_SESSION_COOKIE_SAMESITE=Lax` and
+`MERCHANT_SESSION_COOKIE_SECURE=false`, so the merchant cookie survives plain
+http. `--merchant-token` requires the base seed to have already created the
+demo merchant, the same way `--token-only` requires the demo client. The two
+tokens live side by side under `devdata/` and either can be re-minted alone
+once that base seed has run once.
+
 Both `devdata/` and `static/dev/` are git-ignored.
 
 ### Starting the demo over

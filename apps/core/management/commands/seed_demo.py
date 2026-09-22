@@ -15,8 +15,9 @@ converges rather than duplicating. To start over, delete the database and
 migrate again — exchange rates and audit entries are append-only by design and
 cannot be deleted, here or anywhere else.
 
-    python manage.py seed_demo                # seed, and mint a portal token
-    python manage.py seed_demo --token-only   # just a fresh token, when one expires
+    python manage.py seed_demo                  # seed, and mint a portal token
+    python manage.py seed_demo --token-only     # just a fresh client token, when one expires
+    python manage.py seed_demo --merchant-token # bind + mint a token for the demo merchant
 """
 
 import json
@@ -81,6 +82,17 @@ DEV_ALGORITHM = "EdDSA"
 
 CLIENT_SUBJECT = "b2core-demo-client-1"
 
+#: The subject ``--merchant-token`` binds to the demo merchant. A different
+#: constant from ``CLIENT_SUBJECT`` on purpose: the two rows must never be
+#: reachable by the same token, which is exactly what
+#: ``apps.merchant_panel.session`` refuses on the real path.
+MERCHANT_SUBJECT = "b2core-demo-merchant-1"
+
+#: The merchant ``make_merchant`` creates and ``--merchant-token`` looks up.
+#: One constant rather than the string typed twice, so the two can never name
+#: two different rows.
+DEMO_MERCHANT_NAME = "تاجر بغداد"
+
 #: Prints the six digits each seeded account's authenticator would be showing.
 #: Useful when there is no phone to hand; ``unhexlify`` because ``key`` is hex.
 TOTP_CODES_SNIPPET = (
@@ -97,6 +109,9 @@ TOTP_CODES_SNIPPET = (
 KEY_PATH = Path("devdata") / "b2core-dev-key.pem"
 JWKS_PATH = Path("static") / "dev" / "b2core-jwks.json"
 TOKEN_PATH = Path("devdata") / "b2core-demo-token.txt"
+#: The merchant token's own file, separate from the client's — a developer
+#: minting one must not clobber the other on disk.
+MERCHANT_TOKEN_PATH = Path("devdata") / "b2core-demo-merchant-token.txt"
 
 
 class Command(BaseCommand):
@@ -121,10 +136,19 @@ class Command(BaseCommand):
             "Use when the last one expired.",
         )
         parser.add_argument(
+            "--merchant-token",
+            action="store_true",
+            help="Bind the demo merchant to a demo b2core_id and mint a token "
+            "shaped like the one the merchant menu item would hand it, then "
+            "exit. Requires the demo merchant to already exist — run "
+            "`seed_demo` without this flag first.",
+        )
+        parser.add_argument(
             "--token-hours",
             type=int,
             default=12,
-            help="How long the portal token stays valid (default: 12).",
+            help="How long the minted token stays valid (default: 12). Governs "
+            "--token-only and --merchant-token alike.",
         )
         parser.add_argument(
             "--host",
@@ -152,6 +176,17 @@ class Command(BaseCommand):
                 raise CommandError("No demo client yet. Run `seed_demo` without --token-only first.")
             token = self.mint_token(client, hours=options["token_hours"])
             self.report_portal(token, hours=options["token_hours"])
+            return
+
+        if options["merchant_token"]:
+            merchant = Merchant.objects.filter(name=DEMO_MERCHANT_NAME).first()
+            if merchant is None:
+                raise CommandError(
+                    "No demo merchant yet. Run `seed_demo` without --merchant-token first."
+                )
+            self.bind_merchant_subject(merchant)
+            token = self.mint_merchant_token(merchant, hours=options["token_hours"])
+            self.report_merchant_token(merchant, token, hours=options["token_hours"])
             return
 
         with transaction.atomic():
@@ -248,7 +283,7 @@ class Command(BaseCommand):
 
     def make_merchant(self, user, *methods, created_by) -> Merchant:
         merchant, _ = Merchant.objects.get_or_create(
-            name="تاجر بغداد",
+            name=DEMO_MERCHANT_NAME,
             defaults={"user": user, "notes": "بيانات تجريبية — seed_demo"},
         )
         if merchant.user_id != user.pk:
@@ -269,8 +304,22 @@ class Command(BaseCommand):
                     daily_cap=caps[method.code],
                     created_by=created_by,
                 )
-        self.note("merchant 'تاجر بغداد' with one active wallet per method")
+        self.note(f"merchant {DEMO_MERCHANT_NAME!r} with one active wallet per method")
         return merchant
+
+    def bind_merchant_subject(self, merchant: Merchant) -> None:
+        """Give the demo merchant a b2core_id, converging like everything else here.
+
+        ``--merchant-token`` is the only caller: the base seed leaves
+        ``b2core_id`` unset, exactly as a real merchant Finance has not yet
+        matched to a B2CORE account would be, and the field is left alone until
+        someone actually asks for a merchant token to mint against it.
+        """
+        if merchant.b2core_id == MERCHANT_SUBJECT:
+            return
+        merchant.b2core_id = MERCHANT_SUBJECT
+        merchant.save(update_fields=["b2core_id", "updated_at"])
+        self.note(f"bound {merchant.name} to b2core_id={MERCHANT_SUBJECT!r}")
 
     def make_rates(self, admin) -> None:
         """Only if none is in force — ``ExchangeRate`` is append-only (spec §5)."""
@@ -374,6 +423,32 @@ class Command(BaseCommand):
         path.write_text(json.dumps({"keys": [jwk]}, indent=2), encoding="utf-8")
 
     def mint_token(self, client, *, hours: int) -> str:
+        return self._mint_token(
+            subject=client.b2core_id,
+            display_name=client.display_name,
+            email=client.email,
+            hours=hours,
+            path=TOKEN_PATH,
+        )
+
+    def mint_merchant_token(self, merchant, *, hours: int) -> str:
+        """A token shaped exactly like :meth:`mint_token`'s, for the merchant menu item.
+
+        B2CORE mints one token shape for everyone — the menu restriction is on
+        its side, not in the claims — so this signs the same claim set with a
+        different ``sub`` and nothing else different. The email is the
+        merchant's own login account's, since B2CORE's real claims describe the
+        person, not the row they turn out to be bound to.
+        """
+        return self._mint_token(
+            subject=merchant.b2core_id,
+            display_name=merchant.name,
+            email=merchant.user.email if merchant.user_id else "",
+            hours=hours,
+            path=MERCHANT_TOKEN_PATH,
+        )
+
+    def _mint_token(self, *, subject: str, display_name: str, email: str, hours: int, path: Path) -> str:
         key = self.signing_key()
         self.write_jwks(key)
 
@@ -383,14 +458,14 @@ class Command(BaseCommand):
         # of those was in the old fixture and none of them is real, which is
         # exactly how the integration came to be tested against a service that
         # does not exist.
-        first, _, last = client.display_name.partition(" ")
+        first, _, last = display_name.partition(" ")
         claims = {
-            "sub": client.b2core_id,
+            "sub": subject,
             "iss": DEV_ISSUER,
             "iat": now,
             "nbf": now,
             "exp": now + hours * 3600,
-            "email": client.email,
+            "email": email,
             "first_name": first,
             "last_name": last,
             "aal": "aal1",
@@ -400,9 +475,9 @@ class Command(BaseCommand):
         }
         token = jwt.encode(claims, key, algorithm=DEV_ALGORITHM, headers={"kid": DEV_KID})
 
-        path = self.base_dir / TOKEN_PATH
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(token, encoding="utf-8")
+        full_path = self.base_dir / path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(token, encoding="utf-8")
         return token
 
     # -- output ------------------------------------------------------------
@@ -524,6 +599,56 @@ class Command(BaseCommand):
         self.out(
             f"  The token is valid for {hours}h and is also saved at {TOKEN_PATH}.\n"
             "  When it expires: python manage.py seed_demo --token-only"
+        )
+        self.out("")
+        self.out(
+            "Seeded. Everything above is demo data and DEBUG-only.",
+            style=self.style.SUCCESS,
+        )
+
+    def report_merchant_token(self, merchant, token: str, *, hours: int) -> None:
+        """The same console-paste recipe as :meth:`report_portal`, for the panel.
+
+        Same stand-in B2CORE, same signature check, same JWKS — only the
+        subject and the route differ. The two local-only cookie lines are new
+        here rather than shared with the client's block: they relax the
+        merchant session cookie the same way ``PORTAL_SESSION_COOKIE_*`` relax
+        the client's, and nothing does that for you automatically.
+        """
+        self.heading("Merchant panel without B2CORE")
+        self.out(
+            f"  A token shaped exactly like the client's above, sub={MERCHANT_SUBJECT!r},\n"
+            f"  bound to merchant #{merchant.pk} ({merchant.name}). The binding runs the\n"
+            "  real check in apps/merchant_panel/session.py - nothing here is bypassed.\n"
+        )
+        self.out(
+            "  1. If you have not already, put the B2CORE_* lines from the client\n"
+            "     portal section above in .env - both surfaces share one B2CORE stand-in.\n"
+            "     PORTAL_ALLOW_STANDALONE=true from there also covers /merchant/embed/.\n"
+            "     Then add these two, for the same reason PORTAL_SESSION_COOKIE_* are\n"
+            "     relaxed above - the merchant cookie needs SameSite=None, and that is\n"
+            "     dropped outright on plain http:\n"
+        )
+        for line in (
+            "MERCHANT_SESSION_COOKIE_SAMESITE=Lax",
+            "MERCHANT_SESSION_COOKIE_SECURE=false",
+        ):
+            self.out(f"       {line}")
+        self.out(
+            f"\n  2. Open {self.host}/merchant/embed/ , then paste this into the DevTools\n"
+            "     console (it hands the token to the session endpoint the way B2CORE\n"
+            "     would from the merchant menu item):\n"
+        )
+        self.out(
+            "       await fetch('/merchant/session/', {method:'POST', "
+            "headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:"
+            f"'{token}'"
+            "})}).then(r => r.json())\n"
+        )
+        self.out(f"  3. Open {self.host}/merchant/ - the session is picked up from the cookie.\n")
+        self.out(
+            f"  The token is valid for {hours}h and is also saved at {MERCHANT_TOKEN_PATH}.\n"
+            "  When it expires: python manage.py seed_demo --merchant-token"
         )
         self.out("")
         self.out(
