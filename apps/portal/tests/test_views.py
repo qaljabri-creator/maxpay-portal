@@ -562,8 +562,9 @@ class BootstrapPageTests(PortalViewTestCase):
 
         Whatever it paints then is what the client sees for the first moments
         inside the room, so it is a decision and not a fallback: light. The
-        attribute has to be *there* and say so, because the palette in
-        embed.css forks on its absence as well as its value.
+        attribute has to be *there* and say so — panel-tokens.css, which this
+        surface shares with the two panels, forks on the attribute's value and
+        defaults to dark, so an absent attribute would paint the frame dark.
         """
         self.assertContains(self.client.get(self.bootstrap_url), 'data-theme="light"')
 

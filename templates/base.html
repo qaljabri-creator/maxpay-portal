@@ -7,15 +7,14 @@
   <meta name="robots" content="noindex, nofollow">
   <title>{% block title %}{% trans "بوابة MaxPay" %}{% endblock %}</title>
   {% comment %}Three sheets on every internal page: the shared foundation, the
-  palette this tool family is painted in, then the one this surface owns.
+  palette all three surfaces are painted in, then the one this surface owns.
   system.css carries the typeface and the reset that all three surfaces must
   not be allowed to differ on; panel-tokens.css overrides its palette with
-  B2CORE's, for the two panels only; the third sheet carries the components,
-  which are nobody else's business.
+  B2CORE's, for Finance, the merchant panel and the client portal alike; the
+  third sheet carries the components, which are nobody else's business.
 
   panel-tokens.css sits between them because it is an override layer and has
-  to win over system.css while still being visible to the sheet below. The
-  client portal does not load it — see the note at the foot of that file.
+  to win over system.css while still being visible to the sheet below.
 
   The third is a block because the two panels no longer share one: Finance
   keeps the default below, and the merchant shell swaps in its own. Anything

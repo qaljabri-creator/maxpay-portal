@@ -1,32 +1,34 @@
 /* =========================================================================
-   MaxPay — the B2CORE palette, for the two internal panels
+   MaxPay — the B2CORE palette, shared by all three surfaces
    -------------------------------------------------------------------------
-   Finance and the merchant panel are now painted in B2CORE's official tokens
-   rather than the product's own black-and-cyan. The reason is the merchant
-   panel: it is going to be embedded inside the B2CORE room, and a panel that
-   is a different colour from the room it sits in reads as a foreign object
-   pasted into the page. Finance follows it because the two panels are one
-   tool family — a desk that runs both should not find the greys moving
-   underneath it when it switches tab.
+   Finance, the merchant panel and the client portal are all painted in
+   B2CORE's official tokens rather than the product's own black-and-cyan. The
+   reason started with the merchant panel: it is going to be embedded inside
+   the B2CORE room, and a panel that is a different colour from the room it
+   sits in reads as a foreign object pasted into the page. Finance followed it
+   because the two panels are one tool family — a desk that runs both should
+   not find the greys moving underneath it when it switches tab. The client
+   portal followed both for the same reason one level up: three surfaces a
+   client and a merchant can each end up looking at inside the same B2CORE
+   session should not be three different colour stories.
 
-   **Where this sits in the load order.** `templates/base.html` loads
-   `system.css` first and then this file, before the surface sheet:
+   **Where this sits in the load order.** Every surface's base template loads
+   `system.css` first and then this file, before its own sheet:
 
-     system.css        the typeface, the reset, and the old palette
-     panel-tokens.css  this file — overrides the palette, nothing else
-     portal.css        Finance components
-     merchant.css      merchant components
+     templates/base.html          system.css + panel-tokens.css + portal.css
+                                                       (Finance, 403, 2FA)
+     templates/merchant/base.html system.css + panel-tokens.css + merchant.css
+     templates/portal/base.html   system.css + panel-tokens.css + embed.css
 
    So this file is an *override layer*, not a replacement: system.css keeps
-   carrying `--font` and the two reset rules, and both panels keep loading it.
-   The client portal does **not** load this file, which is deliberate — see the
-   note at the bottom.
+   carrying `--font` and the two reset rules, and every surface keeps loading
+   it.
 
-   **One file, not two blocks.** Both panels use the identical fifteen colour
-   tokens, so the palette is declared once here rather than restated at the top
-   of `portal.css` and again at the top of `merchant.css`. Two copies of a
-   palette is two copies that drift, and the surface that drifts is the one
-   nobody happened to open that week.
+   **One file, not three blocks.** All three surfaces use the identical fifteen
+   colour tokens, so the palette is declared once here rather than restated at
+   the top of `portal.css`, `merchant.css` and `embed.css`. Copies of a palette
+   are copies that drift, and the surface that drifts is the one nobody
+   happened to open that week.
 
    Metrics are **not** here. `--radius`, `--tap` and `--rail-w` stay in the
    surface sheets, because a desk tool and a framed phone surface disagree
@@ -34,19 +36,23 @@
    ========================================================================= */
 
 /* --- dark, the default ---------------------------------------------------
-   Dark stays the default because that is what these panels are today and
-   nothing on the server writes a theme attribute for them. The light cut
-   below is declared and ready: the moment the merchant panel is framed and
-   the host announces `embed-theme-change`, the same `data-theme` attribute
-   the client portal already honours switches this surface too, with no
-   further CSS.
+   Dark stays the default because that is what Finance and the merchant panel
+   are today, and nothing on the server writes a theme attribute for either of
+   them. The light cut below is declared and ready: the moment either panel is
+   framed and the host announces `embed-theme-change`, the same `data-theme`
+   attribute the client portal already honours switches that surface too, with
+   no further CSS.
 
-   That is the opposite default from `embed.css`, and deliberately so. The
-   portal is light-until-told-otherwise because it is *born* inside someone
-   else's room and light is the safer guess before the host speaks. These
-   panels are dark-until-told-otherwise because they are dark today and a
-   deploy that silently turned the Finance desk white would be a surprise
-   nobody asked for.
+   The client portal is different only in which state it is *usually* found
+   in, never in which file supplies the colour: `templates/portal/base.html`
+   renders `data-theme` explicitly on every page, `light` or `dark`, and never
+   leaves it absent — so this file's plain dark default is only ever reached
+   there through an explicit `data-theme="dark"`, the same as on the panels.
+   Light is the portal's own decision, described in embed.css, not a second
+   fork here: it is *born* inside someone else's room and light is the safer
+   guess before the host speaks. Finance and the merchant panel are
+   dark-until-told-otherwise because they are dark today and a deploy that
+   silently turned the Finance desk white would be a surprise nobody asked for.
 
    No `prefers-color-scheme` here either, for the reason embed.css gives: the
    room decides, not the operating system.
@@ -140,17 +146,8 @@
    as the absence of the light block instead — which is exactly what it is. */
 
 /* =========================================================================
-   Two things this file does not do, and why
+   One thing this file does not do, and why
    -------------------------------------------------------------------------
-   **It does not touch the client portal.** `templates/portal/base.html` loads
-   system.css + embed.css + flow.css and never reaches this file, so the client
-   surface is still on #19FFFD over black, with embed.css's own light cut at
-   #0A7472. That is a real difference from the two panels as of this commit and
-   it is not an oversight: bringing the portal across is a change to the screen
-   clients actually look at, and it was not part of this one. Whoever does it
-   should move these two blocks into system.css and delete embed.css's light
-   fork, rather than adding a third copy.
-
    **It does not reach the two ink levels B2CORE does not define.** `--ink-3`
    is ours, and on this palette it is the token that costs something. On the
    old near-black ground a third ink still cleared AA; on #171F2B there is far

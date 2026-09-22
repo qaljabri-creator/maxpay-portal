@@ -24,19 +24,26 @@
    `embed-theme-change` (spec §4, step 6). Light is the default, because it is
    what the client sees in the moment before the host has said anything.
 
-   That is the one place this surface departs from the panels. They are pages
-   of their own on a black ground and stay dark-only; system.css carries that
-   palette and both of them load it unchanged. The fork below is loaded by
-   this surface alone.
+   All three surfaces now share one palette for this, `static/css/panel-tokens.css`,
+   loaded right after system.css. Its plain `:root` is dark and its
+   `data-theme="light"` cut is light, with no portal-specific fork needed in
+   this file: `templates/portal/base.html` renders `data-theme` explicitly on
+   every page, `light` or `dark`, and never leaves it absent, so the shared
+   file's default-is-dark rule is only ever reached here through an explicit
+   `data-theme="dark"` — the same mechanism the panels use, arriving at "light
+   unless the host said dark" simply because this surface's own default,
+   written server-side, is light.
 
-   The palette, the typeface and the reset are in static/css/system.css, which
-   this page loads first; what is below is this surface alone. Self-contained
+   The palette, the typeface and the reset are in static/css/system.css and
+   static/css/panel-tokens.css, which this page loads first; what is below is
+   this surface's own measure and its transparent ground. Self-contained
    either way: the policy this page ships under is `default-src 'self'`
    (spec §11), so there is no CDN and no third-party request anywhere.
    ========================================================================= */
 
-/* The palette, the typeface and the reset live in system.css, which every
-   surface loads first. What stays here is this surface's own measure.
+/* The palette, the typeface and the reset live in system.css and
+   panel-tokens.css, which every surface loads first. What stays here is this
+   surface's own measure.
 
    The client portal is a phone surface inside somebody else's frame, so it
    asks for more room than the panels do: a softer corner, and a target sized
@@ -48,64 +55,6 @@
   /* One thumb, one hand, on a phone held at arm's length. Every control that
      can be pressed clears this. */
   --tap: 3rem;
-}
-
-/* --- light, and the fork -------------------------------------------------
-   system.css declares the dark palette on `:root` and all three surfaces load
-   it. Here it is overridden for light, and the selector is the requirement
-   written down: light applies *unless* the host has explicitly said dark.
-
-     no attribute      light   — the frame before any message has arrived
-     data-theme=light  light
-     data-theme=dark   dark    — system.css, untouched
-
-   Written as an override of dark rather than as two symmetric blocks so the
-   dark values keep living in exactly one file. Restating them here would mean
-   a change to the shared palette silently stopped reaching this surface.
-
-   No `prefers-color-scheme` anywhere: the room decides, not the operating
-   system. A client on a dark phone looking at a light B2CORE must get the
-   light frame, and the host tells us which it is.
-
-   Every colour token system.css defines is forked, including `--accent-row`,
-   which this surface does not currently spend. A partial fork is a trap: the
-   first rule that reaches for a token nobody remembered gets a black-ground
-   value on a white card, and nobody sees it until it ships. */
-:root:not([data-theme="dark"]) {
-  /* `--bg` is no longer the page — nothing paints the page. It stays the
-     identity's ground colour, which on this surface is spent on the one thing
-     that must read as *inset* into the card: a form field. Below white, so a
-     field still looks like a well rather than a rectangle of card. */
-  --bg:        #eef1f1;
-  --surface:   #ffffff;
-  --surface-2: #f3f6f6;
-
-  --line:   #dde4e3;
-  --line-2: #c4cecd;
-
-  --ink:   #0b1211;
-  --ink-2: #4a5654;
-  --ink-3: #66716f;
-
-  /* The accent is the one token that cannot simply be inverted. #19FFFD is a
-     glow, and a glow needs a dark ground: as text on white it lands at about
-     1.2:1, which is not a contrast failure so much as an invisible wallet
-     number. So light gets the same hue taken down to a readable value —
-     5.6:1 on the card, AA at every size we set it in — and it is still the
-     only hue on the surface. One accent, two grounds.
-
-     `--accent-ink` flips with it: near-black sits on a neon fill, white sits
-     on this one. Both are the same rule — whatever the fill is, the label on
-     top of it is the far end of the scale. */
-  --accent:      #0a7472;
-  --accent-ink:  #ffffff;
-  --accent-wash: rgba(10, 116, 114, .08);
-  --accent-edge: rgba(10, 116, 114, .38);
-  --accent-row:  rgba(10, 116, 114, .05);
-
-  /* Held to the same reading: #ff5b57 is calibrated for black. */
-  --danger:      #c62f2b;
-  --danger-wash: rgba(198, 47, 43, .10);
 }
 
 /* --- the ground we do not paint -----------------------------------------

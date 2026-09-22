@@ -10,8 +10,9 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="same-origin">
   <title>{% block title %}{% trans "بوابة MaxPay" %}{% endblock %}</title>
-  {# The shared foundation first, then this surface's own sheet. #}
+  {# The shared foundation, then the B2CORE palette all three surfaces share, then this surface's own sheet. #}
   <link rel="stylesheet" href="{% static 'css/system.css' %}">
+  <link rel="stylesheet" href="{% static 'css/panel-tokens.css' %}">
   <link rel="stylesheet" href="{% static 'css/embed.css' %}">
   {% block extra_media %}{% endblock %}
 </head>

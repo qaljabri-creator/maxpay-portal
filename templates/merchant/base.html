@@ -3,11 +3,10 @@
 
 {% comment %}The merchant's shell. It no longer shares the Finance panel's
 sheet: the two panels are different tools for different desks. What it does
-share with Finance now is the palette, in static/css/panel-tokens.css — both
-panels are painted in B2CORE's tokens, and as of that change it is the client
-portal rather than Finance that this surface differs from. It shares nothing
-else, and never did: there is no client section in the navigation because there
-is no client anywhere in this panel's data (spec §2).
+share with Finance now is the palette, in static/css/panel-tokens.css — all
+three surfaces, including the client portal, are painted in B2CORE's tokens.
+It shares nothing else, and never did: there is no client section in the
+navigation because there is no client anywhere in this panel's data (spec §2).
 
 **Why this is a bar and not a rail.** This panel is going to be framed inside
 the B2CORE room, and that room has a vertical sidebar of its own. A second one
