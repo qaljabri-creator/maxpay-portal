@@ -437,6 +437,14 @@ class Command(BaseCommand):
         for role, email, where in rows:
             self.out(f"  {role:<14} {email:<24} password: {options['password']}   -> {where}")
 
+        # Merchants authenticate through B2CORE now; the password door is shut
+        # unless this is set, and there is no B2CORE on a laptop.
+        self.out(
+            "\n  The merchant signs in by password only with this in .env (then restart):\n"
+            "       MERCHANT_PASSWORD_LOGIN=true\n"
+            "  It is off by default everywhere else - merchants come in through B2CORE."
+        )
+
         if options["no_2fa_devices"]:
             self.out(
                 "\n  No authenticators enrolled. First login walks the two-factor wizard\n"

@@ -20,7 +20,7 @@ it carries no client identity.
 
 from django.urls import path, re_path
 
-from . import api, report_views, views
+from . import api, embed_views, report_views, views
 
 app_name = "merchant_panel"
 
@@ -29,6 +29,16 @@ app_name = "merchant_panel"
 REFERENCE = r"(?P<reference>MP-\d{4,12})"
 
 urlpatterns = [
+    # The B2CORE door. The panel is a menu item inside B2CORE, framed from
+    # https://my.maxifyfx.com and restricted there to the merchant client type
+    # — a restriction that is B2CORE's convenience and not a control we can
+    # verify, which is why `embed_views` binds the token's subject to a
+    # merchant record instead of believing the menu. Neither route renders a
+    # request, a client or a merchant's data, so neither is part of the surface
+    # the anonymity sweep walks; both are covered by `tests.test_embed`.
+    path("embed/", embed_views.MerchantEmbedView.as_view(), name="embed"),
+    path("session/", embed_views.MerchantSessionView.as_view(), name="session"),
+
     # Screens (spec §8)
     path("", views.MerchantQueueView.as_view(), name="queue"),
     re_path(rf"^requests/{REFERENCE}/$", views.MerchantRequestDetailView.as_view(), name="request_detail"),

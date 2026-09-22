@@ -30,6 +30,19 @@ from django.urls import NoReverseMatch, reverse
 from django.utils.functional import cached_property
 from django.utils.translation import gettext as _
 
+#: Set by ``MerchantEmbedAuthMiddleware`` when the request is authenticated by
+#: a B2CORE embed session rather than by a password. Both gates below exist to
+#: make a *password* session safe — a second factor in front of a password, and
+#: a forced change of a one-time one — and there is no password in an embed
+#: session for either of them to protect. Read as an attribute rather than
+#: imported, so ``apps.accounts`` keeps knowing nothing about the merchant panel.
+EMBED_ATTRIBUTE = "merchant_embed"
+
+
+def authenticated_by_embed(request) -> bool:
+    return getattr(request, EMBED_ATTRIBUTE, None) is not None
+
+
 #: Views a user must be able to reach *while* they are non-compliant, otherwise
 #: they could never become compliant. ``PORTAL_URL_PREFIX`` joins them from the
 #: other direction: the client portal is not an internal surface at all, and an
@@ -77,6 +90,7 @@ class EnforceTwoFactorMiddleware:
             user is None
             or not user.is_authenticated
             or not getattr(user, "requires_two_factor", False)
+            or authenticated_by_embed(request)
             or self._is_exempt(request)
         ):
             return self.get_response(request)
@@ -175,6 +189,7 @@ class ForcePasswordChangeMiddleware:
             user is None
             or not user.is_authenticated
             or not getattr(user, "must_change_password", False)
+            or authenticated_by_embed(request)
             or request.path.startswith(self.exempt_prefixes)
         ):
             return self.get_response(request)

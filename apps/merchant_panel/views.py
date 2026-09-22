@@ -20,6 +20,7 @@ from the object afterwards — the redirect re-reads it through the serializer
 like every other read.
 """
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import AccessMixin
 from django.core.exceptions import PermissionDenied
@@ -57,9 +58,18 @@ PAGE_SIZE = 25
 
 def panel_poll_ms() -> int:
     """The poll interval, in milliseconds. Spec §8, §10: ten seconds."""
-    from django.conf import settings
-
     return int(getattr(settings, "PANEL_POLL_SECONDS", 10)) * 1000
+
+
+def framed_navigation(request) -> bool:
+    """Whether the browser is loading this page *into a frame*.
+
+    ``Sec-Fetch-Dest`` is set by the browser and cannot be forged by the page
+    being framed, which is what makes it usable here. It is consulted for one
+    purpose only — see :meth:`MerchantPanelMixin.dispatch` — and a browser that
+    does not send it simply gets the ordinary behaviour.
+    """
+    return request.headers.get("Sec-Fetch-Dest", "") == "iframe"
 
 
 class MerchantPanelMixin(AccessMixin):
@@ -69,12 +79,24 @@ class MerchantPanelMixin(AccessMixin):
     merchant's worklist; there is no Finance version of it, and leaving a door
     open "for support" would be a surface on which the anonymity guarantee has
     to be argued rather than simply held.
+
+    "Login" now has two meanings and the panel is indifferent to which one
+    applies: an internal password session, or a B2CORE embed session that
+    :class:`~apps.merchant_panel.embed_auth.MerchantEmbedAuthMiddleware` has
+    already resolved into ``request.user``. Everything below reads
+    ``request.user`` and never asks where it came from.
     """
 
     nav_section = ""
 
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_authenticated:
+            if framed_navigation(request) and getattr(settings, "B2CORE_ORIGIN", ""):
+                # Inside the B2CORE frame, the login page is not an option: it
+                # ships `frame-ancestors 'none'` and would render as a blank
+                # rectangle with no way forward. A merchant whose embed session
+                # expired mid-shift goes back to the door that opened it.
+                return redirect("merchant_panel:embed")
             return self.handle_no_permission()
         # Raises PermissionDenied with a message worth reading: wrong role, no
         # merchant record, or a suspended one.
@@ -87,6 +109,11 @@ class MerchantPanelMixin(AccessMixin):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["nav_section"] = self.nav_section
+        # Inside the B2CORE frame, the two-factor pages are unreachable: they
+        # ship `frame-ancestors 'none'` and would render as a blank rectangle.
+        # The link is hidden rather than broken — there is no password and no
+        # second factor on this path for it to lead to anyway.
+        context["embedded"] = getattr(self.request, "merchant_embed", None) is not None
         context["merchant_name"] = self.merchant.name
         # The rail badge (spec §10). Server-rendered on load and then kept
         # current by the ten-second poll in static/js/panel.js, which reads

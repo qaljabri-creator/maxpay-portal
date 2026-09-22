@@ -89,14 +89,30 @@ class Merchant(TimeStampedModel):
     """
 
     name = models.CharField(_("الاسم"), max_length=150, unique=True)
-    #: The merchant's own account identifier in B2CORE, typed by Finance so a
-    #: payout here can be matched by hand against a movement over there.
+    #: The merchant's own account identifier in B2CORE.
     #:
-    #: It shares a name with :attr:`apps.accounts.models.Client.b2core_id` and
-    #: nothing else. That one *is* the verified ``sub`` claim off a signed token
-    #: and is the only identifier the portal trusts; this one is reference data
-    #: an operator typed in, is never verified against B2CORE, and must never be
-    #: promoted into an authentication or authorisation decision.
+    #: **This field authorises.** It began as reference data — typed by Finance
+    #: so a payout here could be matched by hand against a movement over there,
+    #: and documented as something never to be promoted into an authorisation
+    #: decision. It has been promoted. When B2CORE gained a merchant-panel menu
+    #: item, the token it mints for the person opening it carries no client
+    #: type, so the *only* thing separating an ordinary client from a merchant's
+    #: queue is whether the verified ``sub`` claim equals this string. See
+    #: :mod:`apps.merchant_panel.session`.
+    #:
+    #: Two consequences worth stating where the field is, rather than leaving
+    #: them to be discovered:
+    #:
+    #: * A typo is no longer a reconciliation nuisance. It is a merchant who
+    #:   cannot sign in — or, if it happens to match somebody else's subject,
+    #:   that person holding this merchant's queue.
+    #: * Editing it is an access-control change. It belongs to whoever may
+    #:   manage merchants, and it should be read back from B2CORE rather than
+    #:   copied from an email.
+    #:
+    #: It still shares a name with :attr:`apps.accounts.models.Client.b2core_id`
+    #: and is still a different thing: that one is written *from* a verified
+    #: token, this one is compared *against* one.
     #:
     #: Optional, and unique when present — two merchants pointing at one B2CORE
     #: account is a reconciliation error waiting to happen. Which is why it is
@@ -112,8 +128,9 @@ class Merchant(TimeStampedModel):
         null=True,
         blank=True,
         help_text=_(
-            "معرّف التاجر في B2CORE، للمطابقة اليدوية عند التسوية. "
-            "اتركه فارغًا إن لم يكن له حساب هناك. لا يُتحقق منه آليًا."
+            "معرّف التاجر في B2CORE. هو ما يُفتح به دخول التاجر إلى لوحته من داخل "
+            "B2CORE: يُقارَن بالمُعرّف الموقّع في الرمز، فإن تطابقا فُتحت الجلسة. "
+            "خطأ في كتابته يمنع التاجر من الدخول. اتركه فارغًا إن لم يكن له حساب هناك."
         ),
     )
     is_active = models.BooleanField(_("نشط"), default=True, db_index=True)

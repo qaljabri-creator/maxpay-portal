@@ -46,7 +46,7 @@ anywhere else. Re-running converges rather than duplicating.
 | | | |
 | --- | --- | --- |
 | `/finance/` | `admin@maxifyfx.com` / `staff@maxifyfx.com` | the Finance panel |
-| `/merchant/` | `merchant@maxifyfx.com` | the merchant panel |
+| `/merchant/` | `merchant@maxifyfx.com` | the merchant panel — by password only with `MERCHANT_PASSWORD_LOGIN=true` in `.env`, because merchants come in through B2CORE and that door is shut by default |
 | `/portal/` | the demo client, via the token below | the embedded client flow |
 
 Because a client cannot sign in without B2CORE, the command also stands up a
@@ -382,13 +382,23 @@ which is the path `Merchant.objects.create(b2core_id="")` takes. A check
 constraint refuses `''` at the table for anything that reaches it by a third
 road, such as a queryset `update()`.
 
-It shares a name with `Client.b2core_id` and nothing else. That one is the
-verified `sub` claim off a signed token and is the only identifier the portal
-trusts; this one is reference data an operator typed, is never verified against
-B2CORE, and must never be promoted into an authentication decision. It rides the
-merchant screen, so it rides `manage_merchants`, and `AuditedFormMixin` records
-it on both sides of every edit — which identifier a payout was matched against,
-and who moved it, is exactly the question an audit log is asked afterwards.
+It shares a name with `Client.b2core_id` and is still not the same thing: that
+one is *written from* a verified `sub` claim, this one is *compared against*
+one.
+
+That comparison is new, and it changes what this field is. It used to be
+reference data an operator typed, documented here as something that must never
+be promoted into an authentication decision — and then B2CORE grew a merchant
+menu item, whose token says nothing about who is a merchant, and this field
+became the only thing that does. A typo in it is no longer a reconciliation
+nuisance: it is a merchant who cannot sign in, or — if it happens to match
+another subject — that person holding this merchant's queue. Editing it is an
+access-control change, it should be read back from B2CORE rather than copied out
+of an email, and it is still `manage_merchants` only. `AuditedFormMixin` records
+it on both sides of every edit, which matters more now than it did: which
+identifier a payout was matched against, and who moved it, is exactly the
+question an audit log is asked afterwards. See **The merchant panel inside
+B2CORE** below.
 
 It is not in `merchant_payload`. The client's merchant list is an explicit
 whitelist of `id`, `name` and `method_count`, so the field cannot reach the merchant column
@@ -577,28 +587,34 @@ PyJWT refetches the JWKS whenever it meets an unknown one. Without a floor on
 how often a *forced* refresh may happen, anyone who can reach the session
 endpoint could make us hammer B2CORE with a stream of random `kid` values.
 
-### Two sessions, deliberately
+### Three sessions, deliberately
 
 The internal panel's session cookie stays `SameSite=Lax`, which is a large part
-of what protects it from cross-site request forgery. The client session runs
-inside a third-party iframe, where `Lax` means *never sent* — so it needs
-`SameSite=None; Secure`. That is a weaker cookie, and precisely why it is a
+of what protects it from cross-site request forgery. The two framed surfaces run
+inside a third-party iframe, where `Lax` means *never sent* — so each needs
+`SameSite=None; Secure`. That is a weaker cookie, and precisely why each is a
 **different** cookie:
 
-| | internal | client portal |
-| --- | --- | --- |
-| name | `SESSION_COOKIE_NAME` | `PORTAL_SESSION_COOKIE_NAME` |
-| SameSite | `Lax` | `None` |
-| path | `/` | `/portal/` |
-| attribute | `request.session` | `request.portal_session` |
-| identity | `request.user` | `request.portal_client` |
+| | internal | client portal | merchant panel |
+| --- | --- | --- | --- |
+| name | `SESSION_COOKIE_NAME` | `PORTAL_SESSION_COOKIE_NAME` | `MERCHANT_SESSION_COOKIE_NAME` |
+| SameSite | `Lax` | `None` | `None` |
+| path | `/` | `/portal/` | `/merchant/` |
+| attribute | `request.session` | `request.portal_session` | `request.merchant_session` |
+| identity | `request.user` | `request.portal_client` | `request.user`, from `request.merchant_embed` |
 
-`PortalSessionMiddleware` manages the second store itself rather than running
-Django's session middleware twice, which would have the two instances fighting
-over `request.session` and over which cookie to write on the way out. A system
-check refuses to start if the two names ever collide, or if `SameSite=None` is
+The path is doing as much work as the `SameSite` is: scoped to its own prefix, a
+weak cookie is never even *sent* to the Finance panel, so a bug on one of those
+surfaces cannot be replayed against it.
+
+Both framed stores are managed by `apps/core/embed_sessions.py` rather than by
+running Django's session middleware twice, which would have the instances
+fighting over `request.session` and over which cookie to write on the way out.
+One implementation, two four-line subclasses: a cookie attribute that drifts
+between two copies of this is not a bug anybody finds by reading. System checks
+refuse to start if any two of the three names collide, or if `SameSite=None` is
 ever paired with a non-`Secure` cookie — browsers drop that cookie outright, so
-the symptom would be "no client can ever log in" with nothing in the logs.
+the symptom would be "nobody can ever log in" with nothing in the logs.
 
 A client is not a Django user: no password, no `auth` session, no row in
 `auth_user`. `Client` records are keyed on the verified `sub` claim. A portal
@@ -1497,10 +1513,79 @@ described:
 - **`test_views.py`** — that the template context holds no live rows, that the
   rendered pages carry no identity, that scoping holds, and that each move does
   what the lifecycle says.
+- **`test_embed.py`** — who gets in through B2CORE, and who does not. See the
+  next section.
 
 Tests that pass because the payload was empty prove nothing, so the sweeps run
 against a request that has a thread, an internal note, an attachment, and a
 merchant on either side of it.
+
+### The merchant panel inside B2CORE
+
+The panel is a menu item in B2CORE, restricted there to the merchant client type
+and loaded as an iframe from `https://my.maxifyfx.com`. It reuses the client
+portal's handshake exactly — `embed-iframe-ready`, `embed-request-jwt-token`,
+the same `verify_token` against the same JWKS — because there is one B2CORE and
+one token format, and a second implementation of either would be a second thing
+to keep true.
+
+**The binding is the whole guard, and it is worth being blunt about why.**
+B2CORE's token carries no client type. Checked against a real one on 4 Sep 2026,
+it has `sub`, `email`, `first_name`, `last_name` and the timestamps — nothing
+that says "this person is a merchant". The restriction on the menu item is
+B2CORE's own convenience: anyone who can obtain a token from B2CORE can post it
+at `/merchant/session/`. So the only thing standing between an ordinary client
+and a merchant's queue is that the verified `sub` must equal the `b2core_id` of
+a merchant record. That sentence is a test —
+`TheOnlyGuardTests.test_an_ordinary_client_with_a_perfectly_valid_token_is_refused`
+— and it uses a token that is genuinely valid in every respect.
+
+Four refusals, each with its own code, because "you are not a merchant" and
+"your account is suspended" are different things to be told:
+
+| code | when |
+| --- | --- |
+| `not_a_merchant` | the subject matches no merchant record |
+| `merchant_archived` | it matches one Finance has archived |
+| `merchant_suspended` | it matches one that is not active |
+| `no_login_account` | the merchant has no active merchant login account to render the panel as |
+
+None of them is reported as a token problem, and none offers a retry: the token
+was fine, and fetching a fresher one would change nothing.
+
+Everything the door established is re-established on **every** request, not just
+at the door. Suspending or archiving a merchant takes effect on their next
+click, not their next login, and so does unbinding them from a subject.
+
+`MerchantEmbedAuthMiddleware` is what turns a live embed session into
+`request.user`, and the panel itself is unchanged by all of this: it reads
+`request.user` and never asks where it came from. The middleware also stands
+down the two gates that exist to make a *password* session safe — the second
+factor and the forced password change. There is no password in an embed session
+for either to protect, and both of them redirect to a page that ships
+`frame-ancestors 'none'` and would render inside the frame as a blank rectangle.
+
+CSRF is replaced rather than disabled, exactly as it is for the portal: Django's
+cookie is `SameSite=Lax` and never arrives, so every unsafe request must carry
+an acceptable `Origin` **and** echo the per-session token issued when the
+session was created. `{% csrf_token %}` renders that token inside the frame — a
+context processor swaps it, so the panel's forms are unchanged — and Django's
+own check stands down only for requests these two guards have already passed.
+
+**Framing** is opened for `/merchant/` and nowhere else. The Finance panel keeps
+`frame-ancestors 'none'`, and `MerchantFramingTests` asserts both halves
+together, because opening `frame-ancestors` is the worst line in the project to
+get one prefix wrong on.
+
+**The password door is shut, not removed.** `MERCHANT_PASSWORD_LOGIN` is off by
+default, and with it off a merchant cannot sign in through the two-factor wizard
+or the admin however right their password is. Every merchant account still *has*
+a password — it is what the account was provisioned with — and a door nobody
+uses is a door nobody notices being used. It is a setting rather than a deletion
+because "B2CORE is down and today's queue still has to be worked" is a real
+Tuesday, and a door built during the outage is a door built badly. The refusal
+sits at `authenticate()`, which is the one point the wizard and the admin login
+both pass through, and `manage.py check --deploy` says so out loud when it is on.
 
 ---
 

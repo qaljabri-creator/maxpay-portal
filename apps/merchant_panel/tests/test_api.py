@@ -148,6 +148,12 @@ class SurfaceCoverageTests(SurfaceTestCase):
     #: Route name → how it is exercised above. ``request_action`` is a POST and
     #: is covered by :mod:`.test_views`.
     SURFACE = {
+        # The B2CORE door (embed + session). Neither renders a request, a
+        # client or anything a merchant could mistake for one; what they do
+        # render — a handshake page and a session payload naming the merchant's
+        # own name — is covered by test_embed.
+        "embed": "the B2CORE handshake page — covered by test_embed",
+        "session": "the embed session door — covered by test_embed",
         "queue": "swept as GET",
         "request_detail": "swept as GET",
         "request_action": "POST — covered by test_views",

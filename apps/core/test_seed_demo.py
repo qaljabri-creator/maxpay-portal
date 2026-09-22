@@ -107,6 +107,11 @@ class AuthenticatorTests(SeedDemoTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["wizard"]["steps"].current, "token")
 
+    # The seeded merchant signs in with a password, and merchants no longer may
+    # unless MERCHANT_PASSWORD_LOGIN is on. It is switched on here rather than
+    # by default: the demo prints the line to put in .env, and the default
+    # staying off is the point.
+    @override_settings(MERCHANT_PASSWORD_LOGIN=True)
     def test_a_seeded_account_completes_the_login_and_lands_on_its_panel(self):
         self.seed()
         for email, panel in (

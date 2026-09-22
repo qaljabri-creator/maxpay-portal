@@ -91,6 +91,10 @@ MIDDLEWARE = [
     # which the internal session must never be weakened to. See
     # apps/portal/sessions.py.
     "apps.portal.sessions.PortalSessionMiddleware",
+    # …and a third, for the merchant panel, which B2CORE now frames as a menu
+    # item of its own. Same reason, same shape, a different cookie scoped to
+    # /merchant/. See apps/merchant_panel/sessions.py.
+    "apps.merchant_panel.sessions.MerchantSessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     # After LocaleMiddleware, deliberately: it settles the language from the
     # `django_language` cookie, which is SameSite=Lax and so never reaches us
@@ -104,6 +108,11 @@ MIDDLEWARE = [
     # request.user with OTP verification state.
     "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # Turns a B2CORE embed session into request.user for /merchant/ requests.
+    # After OTPMiddleware, or the user it installs would be overwritten by the
+    # internal cookie's; before the two gates below, which it stands down —
+    # there is no password in an embed session for either of them to protect.
+    "apps.merchant_panel.embed_auth.MerchantEmbedAuthMiddleware",
     # Refuses to let a half-authenticated internal user reach anything before
     # their second factor is set up and verified. Sits after MessageMiddleware
     # because it explains the redirect through the message framework.
@@ -131,6 +140,12 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "django.template.context_processors.i18n",
+                # After Django's own `csrf` processor, which is a builtin and
+                # always runs first: inside the B2CORE frame `{% csrf_token %}`
+                # must render the embed session's token, because Django's CSRF
+                # cookie is SameSite=Lax and never arrives there. Silent on
+                # every other request. See apps/merchant_panel/embed_auth.py.
+                "apps.merchant_panel.embed_auth.embed_csrf_token",
             ],
         },
     },
@@ -417,6 +432,51 @@ PORTAL_SESSION_RATE = env_str("PORTAL_SESSION_RATE", default="30/minute")
 
 #: Lets the bootstrap page run outside an iframe, for local development only.
 PORTAL_ALLOW_STANDALONE = env_bool("PORTAL_ALLOW_STANDALONE", default=False)
+
+
+# --------------------------------------------------------------------------
+# The embedded merchant panel
+# --------------------------------------------------------------------------
+
+#: Where the merchant panel is mounted. The frame-ancestors CSP, the merchant
+#: cookie path and the embed auth middleware all key off it; it must match
+#: config/urls.py.
+MERCHANT_URL_PREFIX = "/merchant/"
+
+# The third session cookie, and the second weak one. The merchant panel is a
+# menu item inside B2CORE now, so it lives in a third-party frame and needs
+# SameSite=None for exactly the reason the client portal does. It is a separate
+# cookie from both of the others, and scoped to /merchant/ so the Finance panel
+# never even receives it. A system check refuses to start on a name collision.
+MERCHANT_SESSION_COOKIE_NAME = env_str(
+    "MERCHANT_SESSION_COOKIE_NAME", default="maxpay_merchant_sid"
+)
+MERCHANT_SESSION_COOKIE_SAMESITE = env_str("MERCHANT_SESSION_COOKIE_SAMESITE", default="None")
+# SameSite=None without Secure is dropped outright by every current browser.
+MERCHANT_SESSION_COOKIE_SECURE = env_bool("MERCHANT_SESSION_COOKIE_SECURE", default=True)
+MERCHANT_SESSION_COOKIE_HTTPONLY = True
+MERCHANT_SESSION_COOKIE_PATH = MERCHANT_URL_PREFIX
+MERCHANT_SESSION_COOKIE_DOMAIN = env_str("MERCHANT_SESSION_COOKIE_DOMAIN", default="") or None
+
+#: An embed session never outlives this, however long-lived the token was.
+MERCHANT_SESSION_MAX_SECONDS = env_int("MERCHANT_SESSION_MAX_SECONDS", default=60 * 60 * 8)
+
+#: The merchant door is unauthenticated and does public-key cryptography, so it
+#: is capped per caller like the portal's.
+MERCHANT_SESSION_RATE = env_str("MERCHANT_SESSION_RATE", default="30/minute")
+
+#: The emergency door: signing a merchant in with a password through the
+#: two-factor wizard.
+#:
+#: **Off.** B2CORE authenticates merchants now, and a password login that
+#: nobody uses is a password login nobody notices being used — every merchant
+#: account still has a password, and 2FA is the only thing in front of it. It
+#: stays in the code rather than being deleted because "B2CORE is down and the
+#: queue has to be worked" is a real Tuesday, and a door built during the
+#: outage is a door built badly. Turning it on is a deliberate act with a
+#: deliberate audit trail: the refusal is enforced at `authenticate()`, which
+#: is the one point both the wizard and the admin login pass through.
+MERCHANT_PASSWORD_LOGIN = env_bool("MERCHANT_PASSWORD_LOGIN", default=False)
 
 
 # --------------------------------------------------------------------------

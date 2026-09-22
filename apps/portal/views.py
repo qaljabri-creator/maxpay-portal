@@ -26,10 +26,8 @@ the body, which an attacker cannot obtain, and its whole effect is to log the
 caller in as whoever that token names.
 """
 
-import json
 import logging
 import secrets
-from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -41,6 +39,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import TemplateView
 
+from apps.core import embed
 from apps.core import hours as business_hours
 
 from . import ratelimit, session
@@ -53,9 +52,6 @@ from .b2core import (
 
 logger = logging.getLogger("maxpay.b2core")
 
-#: Bounds the JSON we are willing to parse from an unauthenticated caller.
-MAX_BODY_BYTES = 16 * 1024
-
 #: The per-session token comes back in this header, not in a cookie.
 CSRF_HEADER = "HTTP_X_PORTAL_CSRF"
 
@@ -65,64 +61,16 @@ CSRF_HEADER = "HTTP_X_PORTAL_CSRF"
 # ---------------------------------------------------------------------------
 
 
-def _own_origin(request) -> str:
-    return f"{request.scheme}://{request.get_host()}"
+# Both live in apps.core.embed: the merchant panel is framed by B2CORE too now,
+# and "which origins may post here" must have one answer for both surfaces.
+allowed_origins = embed.allowed_origins
+origin_is_acceptable = embed.origin_is_acceptable
 
 
-def allowed_origins(request) -> set[str]:
-    """Origins permitted to make an unsafe request against the portal.
-
-    Our own, because the embed page is served from here and its ``fetch`` is
-    same-origin; and B2CORE's, because the protocol allows it to call directly.
-    """
-    origins = {_own_origin(request)}
-    configured = getattr(settings, "B2CORE_ORIGIN", "")
-    if configured:
-        origins.add(configured.rstrip("/"))
-    return origins
-
-
-def origin_is_acceptable(request) -> bool:
-    """Whether this unsafe request came from somewhere we accept.
-
-    A missing ``Origin`` is a rejection, not a pass: browsers send it on every
-    request that matters here, so its absence means the caller is not one.
-    """
-    origin = request.headers.get("Origin", "")
-    if not origin:
-        # Referer is a weaker signal and the only fallback that exists; it is
-        # consulted solely because some embedded webviews omit Origin.
-        referer = request.headers.get("Referer", "")
-        if not referer:
-            return False
-        parts = urlsplit(referer)
-        if not parts.scheme or not parts.netloc:
-            return False
-        origin = f"{parts.scheme}://{parts.netloc}"
-    return origin.rstrip("/") in allowed_origins(request)
-
-
-def error(code: str, message: str, *, status: int, remedy: str = "retry", **extra):
-    """One shape for every failure, so the embed can branch on ``code`` alone."""
-    payload = {"error": code, "detail": message, "remedy": remedy, **extra}
-    response = JsonResponse(payload, status=status)
-    response["Cache-Control"] = "no-store"
-    return response
-
-
-def read_json(request) -> dict:
-    """Parse a JSON body, raising :class:`ValueError` on anything unusable."""
-    if len(request.body) > MAX_BODY_BYTES:
-        raise ValueError("Request body is too large.")
-    if not request.body:
-        return {}
-    try:
-        data = json.loads(request.body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("Request body is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError("Request body must be a JSON object.")
-    return data
+# The same four helpers the merchant embed uses; see apps.core.embed.
+error = embed.error
+read_json = embed.read_json
+MAX_BODY_BYTES = embed.MAX_BODY_BYTES
 
 
 def session_payload(request, client) -> dict:

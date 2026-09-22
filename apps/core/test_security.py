@@ -131,6 +131,14 @@ class SecurityHeaderTestCase(TestCase):
         sync_role_groups()
         self.staff = make_user("staff@maxifyfx.com", Role.FINANCE_STAFF)
 
+    def merchant_user(self):
+        """A merchant account wired to a merchant, for the panel's own screens."""
+        from apps.merchants.models import Merchant
+
+        user = make_user("m@example.com", Role.MERCHANT)
+        Merchant.objects.create(name="تاجر", user=user)
+        return user
+
     def policy(self, response) -> str:
         self.assertIn(
             "Content-Security-Policy",
@@ -184,17 +192,29 @@ class InternalPanelHeaderTests(SecurityHeaderTestCase):
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(response.headers["Cross-Origin-Opener-Policy"], "same-origin")
 
+    @override_settings(B2CORE_ORIGIN="")
     def test_the_merchant_panel_gets_the_same_policy(self):
-        merchant_user = make_user("m@example.com", Role.MERCHANT)
-        from apps.merchants.models import Merchant
+        """Everything but framing, which B2CORE now needs and Finance does not.
 
-        Merchant.objects.create(name="تاجر", user=merchant_user)
-        verify_otp(self.client, merchant_user)
+        With no ``B2CORE_ORIGIN`` configured the merchant panel is framed by
+        nobody, exactly like the Finance panel. What differs when one *is*
+        configured is one directive, and only on this surface — see
+        :class:`MerchantFramingTests`. The origin is cleared explicitly: a
+        developer's ``.env`` may well set one, and this test is about the
+        unconfigured posture.
+        """
+        verify_otp(self.client, self.merchant_user())
 
         policy = self.policy(self.client.get(reverse("merchant_panel:queue")))
 
         self.assertIn("script-src 'self'", policy)
+        self.assertIn("default-src 'self'", policy)
         self.assertIn("frame-ancestors 'none'", policy)
+        # Framed by nobody means the blunter header stays too.
+        self.assertEqual(
+            self.client.get(reverse("merchant_panel:queue")).headers.get("X-Frame-Options"),
+            "DENY",
+        )
 
     def test_the_login_page_is_covered_before_anybody_signs_in(self):
         self.client.logout()
@@ -217,6 +237,56 @@ class AdminHeaderTests(SecurityHeaderTestCase):
 
         self.assertIn("frame-ancestors 'none'", policy)
         self.assertIn("script-src 'self' 'unsafe-inline'", policy)
+
+
+@override_settings(B2CORE_ORIGIN="https://portal.b2core.test")
+class MerchantFramingTests(SecurityHeaderTestCase):
+    """The merchant panel is a B2CORE menu item; the Finance panel is not.
+
+    Opening ``frame-ancestors`` is the single most dangerous line in this
+    project to get one prefix wrong on, so both halves are asserted together:
+    the surface that must be frameable, and the surface that must not.
+    """
+
+    def setUp(self):
+        super().setUp()
+        verify_otp(self.client, self.merchant_user())
+
+    def test_b2core_may_frame_the_merchant_panel(self):
+        policy = self.policy(self.client.get(reverse("merchant_panel:queue")))
+
+        self.assertIn("frame-ancestors https://portal.b2core.test", policy)
+        self.assertNotIn("frame-ancestors 'none'", policy)
+
+    def test_the_panel_does_not_also_send_x_frame_options(self):
+        # DENY would win over the CSP and break the embed outright.
+        response = self.client.get(reverse("merchant_panel:queue"))
+
+        self.assertNotIn("X-Frame-Options", response.headers)
+
+    def test_nothing_else_about_the_policy_is_relaxed(self):
+        policy = self.policy(self.client.get(reverse("merchant_panel:queue")))
+
+        self.assertIn("script-src 'self'", policy)
+        self.assertNotIn("'unsafe-inline'", policy.split("style-src")[0])
+        self.assertIn("default-src 'self'", policy)
+        self.assertIn("object-src 'none'", policy)
+
+    def test_the_handshake_page_is_frameable_before_anybody_signs_in(self):
+        self.client.logout()
+
+        policy = self.policy(self.client.get(reverse("merchant_panel:embed")))
+
+        self.assertIn("frame-ancestors https://portal.b2core.test", policy)
+
+    def test_the_finance_panel_is_still_framed_by_nobody(self):
+        self.client.logout()
+        verify_otp(self.client, self.staff)
+
+        policy = self.policy(self.client.get(reverse("finance:dashboard")))
+
+        self.assertIn("frame-ancestors 'none'", policy)
+        self.assertNotIn("portal.b2core.test", policy)
 
 
 @override_settings(B2CORE_ORIGIN="https://portal.b2core.test")

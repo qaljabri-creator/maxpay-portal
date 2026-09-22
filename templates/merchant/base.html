@@ -65,7 +65,12 @@ the only way into 2FA enrolment from this panel.{% endcomment %}
 
     <div class="navbar__end">
       <span class="navbar__user">{{ merchant_name }}</span>
-      <a class="navbar__link" href="{% url 'two_factor:profile' %}">{% trans "الأمان" %}</a>
+      {% comment %}Hidden inside the B2CORE frame: the two-factor pages refuse
+      to be framed, and a merchant who arrived through B2CORE has no password
+      here for a second factor to stand in front of.{% endcomment %}
+      {% if not embedded %}
+        <a class="navbar__link" href="{% url 'two_factor:profile' %}">{% trans "الأمان" %}</a>
+      {% endif %}
     </div>
   </nav>
 

@@ -57,6 +57,15 @@ PUBLIC = {
     "two_factor:qr": "The enrolment QR, bound to the in-progress wizard session.",
     "set_language": "Django's language switcher; changes a cookie and nothing else.",
     "portal:bootstrap": "The page B2CORE frames. Renders no client data (spec §4).",
+    # The merchant panel's door, since B2CORE frames it as a menu item of its
+    # own. The same two shapes the portal has: a handshake page that renders
+    # nothing, and the endpoint it posts a token to — which must answer "do I
+    # have a session?" to an anonymous caller, because that question *is* the
+    # feature. What neither may do is answer with anything about a merchant,
+    # and `MerchantSurfaceTests` in apps/merchant_panel/tests/test_embed.py
+    # holds them to it.
+    "merchant_panel:embed": "The page B2CORE frames. Renders no merchant data.",
+    "merchant_panel:session": "The embed's own 'do I have a session?' probe.",
 }
 
 #: Under /portal/. Session-less by design — see the module docstring.
@@ -343,6 +352,13 @@ class RoleSeparationTests(TestCase):
 
         for name, pattern in sorted(routes.items()):
             if not name.startswith("merchant_panel:"):
+                continue
+            if name in PUBLIC:
+                # The B2CORE door (embed + session) is open to everyone by
+                # design — it is how anybody, Finance included, asks to be
+                # let in. What it *grants* is tested in
+                # apps/merchant_panel/tests/test_embed.py; a Finance account
+                # gets nothing from it because its subject binds to no merchant.
                 continue
             url = build(name, pattern)
             if url is None:

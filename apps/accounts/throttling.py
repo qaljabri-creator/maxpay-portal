@@ -104,6 +104,24 @@ def is_locked_out(username: str, ip: str) -> bool:
     return failures(username, ip) >= _limit()
 
 
+def merchant_password_login_allowed() -> bool:
+    """Whether a merchant may still sign in with a password at all.
+
+    Off by default since B2CORE started framing the merchant panel: merchants
+    authenticate over there now, and a door nobody uses is a door nobody
+    notices being used. Every merchant account still *has* a password — it is
+    what the account was provisioned with — so leaving the door open would
+    leave the panel reachable by a credential nobody rotates and nobody
+    watches, entirely outside the B2CORE binding that is supposed to be the
+    only way in.
+
+    It is a setting rather than a deletion because "B2CORE is down and today's
+    queue still has to be worked" is a real Tuesday, and a door built during
+    the outage is a door built badly. See MERCHANT_PASSWORD_LOGIN.
+    """
+    return bool(getattr(settings, "MERCHANT_PASSWORD_LOGIN", False))
+
+
 def client_ip(request) -> str:
     """The caller's address, by the same rule the portal's limiter uses."""
     from apps.core.services import client_ip as resolve
@@ -169,6 +187,24 @@ class ThrottledModelBackend(ModelBackend):
             return None
 
         user = super().authenticate(request, username=username, password=password, **kwargs)
+
+        if (
+            user is not None
+            and getattr(user, "role", None) == "merchant"
+            and not merchant_password_login_allowed()
+        ):
+            # The password was right. It is simply not a way into this system
+            # any more — see `merchant_password_login_allowed`. Refused *after*
+            # the hash check rather than before it, so which accounts are
+            # merchants cannot be read off the response time, and logged as a
+            # refusal rather than a failure: the counter is for people guessing
+            # passwords, and this person was not.
+            logger.warning(
+                "Merchant password login refused for %s: MERCHANT_PASSWORD_LOGIN is off.",
+                identifier,
+            )
+            clear(identifier, ip)
+            return None
 
         if identifier:
             if user is None:

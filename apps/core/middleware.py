@@ -4,13 +4,24 @@ One middleware, because there is exactly one question — *what may this page do
 and who may frame it?* — and answering it in two places is how two answers
 diverge.
 
-Three surfaces, three answers:
+Four surfaces, four answers:
 
 **The client portal** (``PORTAL_URL_PREFIX``) is framed by B2CORE, so spec §11's
 ``frame-ancestors`` is set to that origin and nothing else. Django's
 ``XFrameOptionsMiddleware`` would send ``X-Frame-Options: DENY`` alongside and
 break the embed, so the header is stripped here — CSP is what browsers honour
 for a *named* ancestor, and ``X-Frame-Options`` has no equivalent form.
+
+**The merchant panel** (``MERCHANT_URL_PREFIX``) is an internal surface that
+B2CORE now frames as a menu item of its own, so it gets the panels' policy with
+exactly one directive changed: ``frame-ancestors`` names the B2CORE origin
+instead of refusing everyone. Nothing else is relaxed — it still loads one
+stylesheet and one script from us and still takes inline script off the table —
+and the Finance panel is emphatically *not* included: it keeps
+``frame-ancestors 'none'``, because "who may frame this" is a per-surface answer
+and giving two surfaces one answer is how the wrong one gets framed. When
+``B2CORE_ORIGIN`` is unset the merchant panel refuses framing like everything
+else.
 
 **The internal panels** get the strictest policy in the project. They are
 same-origin pages that load one stylesheet and one script from us and make no
@@ -60,6 +71,10 @@ def portal_prefix() -> str:
     return getattr(settings, "PORTAL_URL_PREFIX", "/portal/")
 
 
+def merchant_prefix() -> str:
+    return getattr(settings, "MERCHANT_URL_PREFIX", "/merchant/")
+
+
 def admin_prefix() -> str:
     return getattr(settings, "ADMIN_URL_PREFIX", "/admin/")
 
@@ -75,6 +90,8 @@ class SecurityHeadersMiddleware:
 
         if request.path.startswith(portal_prefix()):
             return self._portal(response)
+        if request.path.startswith(merchant_prefix()):
+            return self._merchant(response)
         return self._internal(request, response)
 
     # -- the embedded client portal ---------------------------------------
@@ -111,6 +128,55 @@ class SecurityHeadersMiddleware:
             )
         )
         response.headers.pop("X-Frame-Options", None)
+        return response
+
+    # -- the merchant panel, which B2CORE frames ---------------------------
+
+    @staticmethod
+    def _merchant(response):
+        """The panels' policy, with framing opened to B2CORE and no wider."""
+        origin = getattr(settings, "B2CORE_ORIGIN", "")
+
+        if "Content-Security-Policy" in response.headers:
+            # The signed attachment view sets its own, stricter policy — a
+            # client-uploaded file served under `default-src 'none'; sandbox`.
+            # Widening it back out here would undo the point of it. The framing
+            # header still goes, exactly as it does on the portal's files: a
+            # proof image opened from inside the frame is still being opened
+            # from inside the frame.
+            if origin:
+                response.headers.pop("X-Frame-Options", None)
+            return response
+
+        ancestors = f"frame-ancestors {origin}" if origin else "frame-ancestors 'none'"
+        directives = [
+            directive
+            for directive in (*BASE_POLICY, *STRICT_SCRIPT)
+            if not directive.startswith("frame-ancestors")
+        ]
+        if origin:
+            # The handshake page posts the token back to us, same-origin; the
+            # connect-src entry is what lets a B2CORE-hosted call reach the
+            # session endpoint directly, exactly as the portal's does.
+            directives = [
+                f"connect-src 'self' {origin}" if directive.startswith("connect-src") else directive
+                for directive in directives
+            ]
+        response.headers["Content-Security-Policy"] = "; ".join((ancestors, *directives))
+        if origin:
+            # Django's XFrameOptionsMiddleware would send DENY alongside and
+            # break the embed. CSP is what browsers honour for a *named*
+            # ancestor, and X-Frame-Options has no equivalent form — so it is
+            # dropped only where a named ancestor has actually been declared.
+            # With no origin configured this surface is framed by nobody and
+            # keeps the blunter header as well.
+            response.headers.pop("X-Frame-Options", None)
+        # Both are set for the panels and both are set here. A browser ignores
+        # Cross-Origin-Opener-Policy on a document inside a frame, so it costs
+        # nothing there and still applies when the panel is opened directly
+        # over the emergency password login.
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
         return response
 
     # -- the internal panels and the admin --------------------------------

@@ -1,0 +1,79 @@
+{% load static i18n %}<!DOCTYPE html>
+{% get_current_language_bidi as LANGUAGE_BIDI %}
+<html lang="ar" dir="{% if LANGUAGE_BIDI %}rtl{% else %}rtl{% endif %}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {# Only ever reached inside the B2CORE frame. #}
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="same-origin">
+  <title>{% trans "لوحة التاجر · MaxPay" %}</title>
+  <link rel="stylesheet" href="{% static 'css/system.css' %}">
+  <link rel="stylesheet" href="{% static 'css/embed.css' %}">
+</head>
+<body class="embed">
+
+{% comment %}
+The page B2CORE frames for the merchant menu item. It renders no merchant data
+and makes no decision of its own: everything visible is a state of the
+handshake, driven by static/js/merchant-embed.js, and its one successful
+outcome is to replace itself with the queue.
+
+No inline script and no inline style, because the policy this page ships under
+is the panels' own `script-src 'self'`. Configuration reaches the script
+through the JSON island at the bottom.
+{% endcomment %}
+
+<main class="embed__stage" id="embed-stage" data-state="{% if not configured %}unconfigured{% else %}connecting{% endif %}">
+  <div class="card" role="status" aria-live="polite">
+
+    <div class="card__mark" aria-hidden="true">
+      <span class="card__mark-glyph">MP</span>
+    </div>
+
+    <h1 class="card__title" id="embed-title">{% trans "جارٍ فتح لوحة التاجر" %}</h1>
+
+    <section class="panel" data-for="connecting">
+      <p class="panel__lead">{% trans "نتحقق من هويتك عبر B2CORE. لن يستغرق الأمر سوى لحظات." %}</p>
+      <div class="meter" aria-hidden="true"><span class="meter__bar"></span></div>
+    </section>
+
+    <section class="panel" data-for="ready">
+      <p class="panel__lead">{% trans "تم التحقق. جارٍ فتح لوحتك…" %}</p>
+      <p class="panel__note" id="embed-greeting"></p>
+    </section>
+
+    <section class="panel" data-for="error">
+      <p class="panel__lead" id="embed-error">{% trans "تعذّر فتح لوحة التاجر." %}</p>
+      <button type="button" class="button" id="embed-retry">{% trans "إعادة المحاولة" %}</button>
+      <p class="panel__note panel__note--muted" id="embed-error-code"></p>
+    </section>
+
+    <section class="panel" data-for="logged-out">
+      <p class="panel__lead">{% trans "تم إنهاء الجلسة." %}</p>
+      <p class="panel__note panel__note--muted">
+        {% trans "سجّل الدخول من جديد في B2CORE للعودة." %}
+      </p>
+    </section>
+
+    <section class="panel" data-for="standalone">
+      <p class="panel__lead">{% trans "تُفتح هذه الصفحة من داخل B2CORE." %}</p>
+      <p class="panel__note panel__note--muted">
+        {% trans "لا يمكن استخدامها مباشرة، لأن هويتك تصل من هناك." %}
+      </p>
+    </section>
+
+    <section class="panel" data-for="unconfigured">
+      <p class="panel__lead">{% trans "الخدمة غير مهيّأة بعد على هذا الخادم." %}</p>
+      <p class="panel__note panel__note--muted">{% trans "تواصل مع الدعم الفني." %}</p>
+    </section>
+
+  </div>
+
+  <p class="embed__foot">{% trans "MaxPay · MaxiFyFX" %}</p>
+</main>
+
+{{ embed_config|json_script:"maxpay-merchant-embed-config" }}
+<script src="{% static 'js/merchant-embed.js' %}" defer></script>
+</body>
+</html>

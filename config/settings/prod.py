@@ -60,18 +60,21 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 
-# DENY everywhere, including the portal — and then SecurityHeadersMiddleware
-# strips it from portal responses only, replacing it with
+# DENY everywhere, including the two framed surfaces — and then
+# SecurityHeadersMiddleware strips it from their responses only, replacing it
+# with
 # `Content-Security-Policy: frame-ancestors <B2CORE origin>` (spec §11). CSP is
 # the header browsers honour for a named ancestor; X-Frame-Options has no
 # equivalent form, so leaving it at DENY for everything else costs nothing.
 X_FRAME_OPTIONS = "DENY"
 
-# The client session cookie is the one that has to survive a third-party
-# iframe. The internal one stays Lax — see apps/portal/sessions.py.
+# The two framed surfaces are the ones that have to survive a third-party
+# iframe. The internal one stays Lax — see apps/core/embed_sessions.py.
 SESSION_COOKIE_SAMESITE = "Lax"
 PORTAL_SESSION_COOKIE_SAMESITE = "None"
 PORTAL_SESSION_COOKIE_SECURE = True
+MERCHANT_SESSION_COOKIE_SAMESITE = "None"
+MERCHANT_SESSION_COOKIE_SECURE = True
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = env_str("EMAIL_HOST", default="")
