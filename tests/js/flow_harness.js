@@ -118,6 +118,7 @@ function element(id, tag) {
  * @param {object} options
  *   config    – the flow config island, merged over sensible defaults
  *   options   – the /portal/options payload the catalogue call answers with
+ *   requests  – the rows the history call (/portal/requests?limit=…) answers with
  *   now       – fixed Date.now() in ms
  * @returns {object} nodes(), type(), quote(), and the raw element registry
  */
@@ -176,7 +177,9 @@ function boot(options = {}) {
       calls.push({ url, init });
       const payload = String(url).startsWith(config.optionsUrl)
         ? options.options || {}
-        : { results: [] };
+        : String(url).startsWith(config.requestsUrl + "?")
+          ? { requests: options.requests || [], has_more: false }
+          : { results: [] };
       return Promise.resolve({ ok: true, status: 200, data: payload });
     },
     onSession(fn) { sessionHandler = fn; },

@@ -1349,7 +1349,10 @@
     // Ended, but not refused. A client whose request was cancelled was not
     // turned down, and a red pill would tell them they were.
     if (status === "cancelled") { return "pill--cancelled"; }
-    if (status === "closed") { return "pill--closed"; }
+    // One look for one label: the client is told credited and closed in the
+    // same words ("أُضيف المبلغ إلى حسابك", apps/portal/payloads.status_label),
+    // and two colours under one label would say they are two different things.
+    if (status === "closed" || status === "credited") { return "pill--closed"; }
     return "";
   }
 
