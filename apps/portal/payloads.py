@@ -40,8 +40,12 @@ DEPOSIT_STEPS: list[tuple[str, str, str | None]] = [
     (RequestStatus.SUBMITTED, "تم استلام طلبك", "submitted_at"),
     (RequestStatus.ASSIGNED, "بانتظار تأكيد التاجر", "assigned_at"),
     (RequestStatus.MERCHANT_CONFIRMED, "أكّد التاجر استلام المبلغ", "merchant_actioned_at"),
-    (RequestStatus.CREDITED, "أُضيف المبلغ إلى حسابك", None),
-    (RequestStatus.CLOSED, "اكتمل الطلب", "closed_at"),
+    # One step for two statuses (Finance manager, Sep 2026). Once the money is
+    # in the client's account there is nothing left for them to wait on, and a
+    # separate "completed" after it only told them the desk had tidied up.
+    # `credited` is folded into this step by CLIENT_STEP_OF below; the
+    # lifecycle, the audit log and Finance's track still keep the two apart.
+    (RequestStatus.CLOSED, "أُضيف المبلغ إلى حسابك", "closed_at"),
 ]
 
 WITHDRAWAL_STEPS: list[tuple[str, str, str | None]] = [
@@ -60,6 +64,14 @@ OFF_TRACK_LABELS: dict[str, tuple[str, str]] = {
     RequestStatus.PENDING: ("طلبك بانتظار المالية", "current"),
     RequestStatus.REJECTED: ("طلب مرفوض", "rejected"),
     RequestStatus.CANCELLED: ("طلب مُلغى", "rejected"),
+}
+
+
+#: Statuses the client is shown as a step they share with another. Display
+#: only: the request's own status is untouched, and Finance's
+#: :func:`apps.transactions.services.track` still shows each separately.
+CLIENT_STEP_OF: dict[str, str] = {
+    RequestStatus.CREDITED: RequestStatus.CLOSED,
 }
 
 
@@ -88,7 +100,8 @@ def timeline(deposit: Request) -> list[dict]:
         # somewhere, and pretending to know exactly where would be a guess.
         reached = 0
     else:
-        reached = order.index(deposit.status) if deposit.status in order else 0
+        status = CLIENT_STEP_OF.get(deposit.status, deposit.status)
+        reached = order.index(status) if status in order else 0
 
     entries = []
     for index, (status, label, field) in enumerate(steps):

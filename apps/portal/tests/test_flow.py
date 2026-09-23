@@ -1546,7 +1546,41 @@ class RequestViewTests(FlowTestCase):
         self.assertEqual(states["submitted"], "done")
         self.assertEqual(states["assigned"], "done")
         self.assertEqual(states["merchant_confirmed"], "current")
-        self.assertEqual(states["credited"], "pending")
+        self.assertEqual(states["closed"], "pending")
+
+    def test_credited_and_closed_are_one_step_for_the_client(self):
+        """Finance manager, Sep 2026: "added to your account" and "completed"
+        are shown as one step. Display only — see the Finance side below."""
+        for status in (RequestStatus.CREDITED, RequestStatus.CLOSED):
+            with self.subTest(status=status):
+                self.deposit.status = status
+                self.deposit.save(update_fields=["status"])
+
+                timeline = self.body(self.client.get(self.detail_url))["request"][
+                    "timeline"
+                ]
+
+                self.assertEqual(
+                    [step["key"] for step in timeline],
+                    ["submitted", "assigned", "merchant_confirmed", "closed"],
+                )
+                last = timeline[-1]
+                self.assertEqual(last["label"], "أُضيف المبلغ إلى حسابك")
+                self.assertEqual(last["state"], "done")
+                self.assertNotIn("اكتمل الطلب", [step["label"] for step in timeline])
+
+    def test_the_merge_does_not_reach_the_status_or_finances_track(self):
+        from apps.transactions.services import track
+
+        self.deposit.status = RequestStatus.CREDITED
+        self.deposit.save(update_fields=["status"])
+        self.client.get(self.detail_url)
+
+        self.deposit.refresh_from_db()
+        self.assertEqual(self.deposit.status, RequestStatus.CREDITED)
+        finance = {step["key"]: step["state"] for step in track(self.deposit)}
+        self.assertEqual(finance["credited"], "current")
+        self.assertEqual(finance["closed"], "pending")
 
     def test_a_rejection_carries_its_reason(self):
         self.deposit.status = RequestStatus.REJECTED
