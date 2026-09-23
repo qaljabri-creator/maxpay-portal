@@ -18,10 +18,10 @@
 >
 > 1. **الفرع.** `master` على GitHub ما يزال عند الإيداع الأول وحده (`c42cddb`). كل العمل على
 >    الفرع `portal/one-screen-compose`. انسخ هذا الفرع بالاسم.
-> 2. **`manage.py` يعود افتراضياً إلى إعدادات التطوير** (`config.settings.dev`، و`DEBUG` فيها
->    `True` افتراضياً). `wsgi.py` وحده يعود إلى `prod`. إن لم يحمل `.env` السطر
->    `DJANGO_SETTINGS_MODULE=config.settings.prod` فكل `migrate` و`check` و`createsuperuser`
->    تجري بإعدادات التطوير على قاعدة الإنتاج.
+> 2. **`manage.py` يرفض العمل بلا `DJANGO_SETTINGS_MODULE`.** كان يعود بصمت إلى إعدادات
+>    التطوير؛ صار يتوقّف برسالة تسمّي السطر الناقص. الطريق الوحيد إلى `dev` بلا تسمية هو
+>    `MAXPAY_LOCAL_DEV=true` — **لا يُضبط على الخادم أبداً.** على الخادم: السطر
+>    `DJANGO_SETTINGS_MODULE=config.settings.prod` في `.env`، وإلا لن يعمل أي أمر.
 > 3. **لا تنسخ `.env` من جهاز المطوّر.** هو مضبوط للعرض المحلي: SQLite، و`DEBUG=true`،
 >    وB2CORE مزيّف على `127.0.0.1`، وباب كلمة مرور التاجر مفتوح. انظر §4.4.
 
@@ -36,7 +36,7 @@
 | **PostgreSQL** | 16 هو ما يشغّله `docker-compose.yml` محلياً. `backup_database` يحتاج أدوات العميل (`pg_dump`) في `PATH` | `docker-compose.yml`، `backup_database.py` |
 | **Redis** | 7 هو ما يشغّله `docker-compose.yml`. حزمة العميل `redis==8.1.0` في `requirements.txt` | `docker-compose.yml`، `base.py` (`REDIS_URL`) |
 | **nginx** | أي إصدار حديث مع TLS | لا إعداد له في المشروع — يُكتب في §6 |
-| **gunicorn** | **ليس في `requirements.txt`.** يُثبَّت يدوياً في §6، وإصداره **غير مُتحقَّق منه** مع المشروع | `STATUS.md` B4 |
+| **gunicorn** | `26.2.0`، مثبَّت في `requirements.txt`. **لم يُشغَّل مع المشروع بعد**: لا يعمل على Windows حيث طُوِّر، فأوّل تشغيل له على الخادم | `requirements.txt`، `STATUS.md` B4 |
 | **Node.js** | اختياري: لتشغيل اختبارات `tests/js/` فقط، ولا يلزم للتشغيل | `README.md` «Tests and checks» |
 
 **ملاحظة على Python 3.13:** Debian 13 يحمله في مستودعاته. Ubuntu 24.04 يحمل 3.12، فتحتاج
@@ -214,8 +214,7 @@ sudo -u maxpay git clone --branch portal/one-screen-compose \
 cd /srv/maxpay/app
 sudo -u maxpay python3.13 -m venv .venv
 sudo -u maxpay .venv/bin/pip install --upgrade pip
-sudo -u maxpay .venv/bin/pip install -r requirements.txt
-sudo -u maxpay .venv/bin/pip install gunicorn   # ليس في requirements.txt — انظر §1
+sudo -u maxpay .venv/bin/pip install -r requirements.txt   # يشمل gunicorn
 ```
 
 ### 4.3 `.env` من `.env.example`
@@ -246,6 +245,9 @@ sudo -u maxpay nano .env
 | `DJANGO_DEBUG` | — | احذفه أو اتركه `false` | `prod.py` يفرض `DEBUG = False` أياً كانت القيمة |
 | `DJANGO_ALLOWED_HOSTS` | أسماء المضيف المقبولة | `YOUR_DOMAIN` | `prod.py` يرفض الإقلاع بلا قيمة. `core.E013` إن احتوت `*` |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | أصول موثوقة لـ CSRF | `https://YOUR_DOMAIN` | اختياري، يقرؤه `prod.py` فقط. **غير موجود في `.env.example`** |
+| `TRUSTED_PROXY_COUNT` | كم بروكسي أمام التطبيق يُصدَّق في `X-Forwarded-For` | **`1`** (nginx) | `base.py`، افتراضه `0`. انظر §6.2 |
+| `MAXPAY_LOCAL_DEV` | يسمح لـ `manage.py` بالعودة إلى `dev` بلا تسمية | **لا يُضبط** | `manage.py`. للمطوّر فقط |
+| `ALLOW_DEMO_RESET` | المفتاح الثاني لـ `reset_demo` | **لا يُضبط** | `base.py`، افتراضه `false` |
 
 **قاعدة البيانات**
 
@@ -336,9 +338,12 @@ sudo -u maxpay nano .env
 | `PORTAL_ALLOW_STANDALONE=true` | صفحة المصافحة تعمل خارج الإطار |
 | `PORTAL_/MERCHANT_SESSION_COOKIE_SAMESITE=Lax`، `_SECURE=false` | `prod.py` يتجاوزها، لكن لا تعتمد على ذلك: احذفها |
 | `MERCHANT_PASSWORD_LOGIN=true` | باب الطوارئ مفتوح: التاجر يدخل بكلمة مرور خارج ربط B2CORE |
+| `ALLOW_DEMO_RESET=true`، `MAXPAY_LOCAL_DEV=true` | أدوات العرض المحلي. الأول يفتح `reset_demo` (الذي يرفض PostgreSQL على أي حال)، والثاني يُسقط رفض `manage.py` |
 
 و**لا تشغّل `seed_demo` ولا `reset_demo` في الإنتاج.** كلاهما يرفض العمل ما لم يكن `DEBUG`
-مفعّلاً — وهذا سبب آخر ليكون `DJANGO_SETTINGS_MODULE` صحيحاً.
+مفعّلاً. و`reset_demo` — الذي يحذف الطلبات وشبكة التجار وسجل التدقيق — يحمل حارسين آخرين لا
+يقرآن `DEBUG`: يرفض PostgreSQL دائماً، ويرفض ما لم يُضبط `ALLOW_DEMO_RESET=true`. **لا تضع
+`ALLOW_DEMO_RESET` ولا `MAXPAY_LOCAL_DEV` في `.env` الخادم.**
 
 ---
 
@@ -475,10 +480,13 @@ server {
 1. **`X-Forwarded-Proto`** — `prod.py` يضبط `SECURE_SSL_REDIRECT = True` ويقرأ
    `SECURE_PROXY_SSL_HEADER` من هذه الترويسة. بدونها يرى Django كل طلب HTTP ويعيد التوجيه
    إلى HTTPS بلا نهاية.
-2. **`X-Forwarded-For $remote_addr`**، لا `$proxy_add_x_forwarded_for` —
-   `apps/core/services.client_ip` يأخذ **أول** عنوان في الترويسة، وهو ما يعدّ عليه قفل الدخول
-   ومُحدِّد البوابة. إن أُضيف عنوان nginx إلى ما أرسله العميل، فالعميل يختار عنوانه بنفسه ويتجاوز
-   الحدّين.
+2. **`X-Forwarded-For` مع `TRUSTED_PROXY_COUNT=1` في `.env`** — عليه يعدّ قفل الدخول ومُحدِّد
+   البوابة. `apps/core/services.client_ip` لا يثق بالترويسة إلا بعدد البروكسيات المُعلَن، ويأخذ
+   العنوان **من اليمين** بذلك العدد: ما على اليسار كتبه المُرسِل نفسه. افتراضياً `0` = تُتجاهَل
+   الترويسة ويُستعمل `REMOTE_ADDR` — وخلف nginx هذا يعني أن **كل العملاء عنوان واحد** (عنوان
+   nginx)، فيقفل خطأُ عميلٍ واحد الجميع. لذلك `1` إلزامي هنا. `$remote_addr` كما في الإعداد أعلاه
+   يعطي سلسلة من عنصر واحد، و`$proxy_add_x_forwarded_for` يعمل كذلك مع `1`. إن وُضع موازن
+   حمل أمام nginx فالعدد `2`.
 3. **`client_max_body_size 11m`** — `MAX_UPLOAD_SIZE_BYTES` في `base.py` هو 10 ميغابايت،
    والسطر يترك هامشاً لغلاف الـ multipart. أقلّ منه يرفض nginx إثبات تحويل مسموحاً به.
 
@@ -593,13 +601,13 @@ journalctl -u maxpay -f | grep -i b2core
 
 ### 8.1 ما يغطّيه `backup_database` وما لا يغطّيه
 
-- **يغطّي:** قاعدة البيانات، بـ `pg_dump --format=custom`، في `BACKUP_DIR`، باسم
-  `maxpay-<UTC>.dump`، ويحذف ما هو أقدم من `BACKUP_RETENTION_DAYS`. كلمة المرور في بيئة
-  العملية لا في سطر الأمر.
-- **لا يشفّر، ولا ينقل الملف خارج الخادم** (مكتوب صراحةً في رأس `backup_database.py`).
-- **لا يغطّي الملفات المرفوعة.** إثباتات التحويل ومرفقات الرسائل في
-  `/srv/maxpay/app/private_media/`، وهي **خارج القاعدة**. نسخة القاعدة وحدها تستعيد طلبات
-  تشير إلى ملفات غير موجودة.
+- **يغطّي القاعدة:** بـ `pg_dump --format=custom`، في `BACKUP_DIR`، باسم `maxpay-<UTC>.dump`.
+  كلمة المرور في بيئة العملية لا في سطر الأمر.
+- **ويغطّي الملفات المرفوعة:** `private_media/` — إثباتات التحويل ومرفقات الرسائل، وهي أدلّة
+  مالية خارج القاعدة — في `maxpay-media-<UTC>.tar.gz` **بنفس الطابع الزمني**. إن تعذّر أرشفتها
+  يفشل الأمر كلّه (وتبقى نسخة القاعدة).
+- يحذف الاثنين معاً حين يتجاوزان `BACKUP_RETENTION_DAYS`.
+- **لا يشفّر، ولا ينقل الملفات خارج الخادم** (مكتوب صراحةً في رأس `backup_database.py`).
 
 `BACKUP_DIR` يجب أن يكون **قرصاً آخر** (volume مركّب) لا يشارك القاعدة مصيرها. النقل خارج
 الخادم والتشفير قرار تشغيلي غير موجود في المشروع — **يجب أن يُحسم قبل الإطلاق.**
@@ -646,7 +654,7 @@ sudo systemctl enable --now maxpay-backup.timer
 systemctl list-timers | grep maxpay
 ```
 
-وأضف نسخاً لـ `private_media/` إلى نفس الوجهة خارج الخادم، بالأداة التي تعتمدونها.
+وانقل محتوى `BACKUP_DIR` — الملفّين معاً — خارج الخادم، بالأداة التي تعتمدونها.
 
 ### 8.4 تجربة الاستعادة — فعلياً، لا على الورق
 
@@ -690,8 +698,19 @@ sudo -u maxpay env POSTGRES_DB=maxpay_restore_test \
 sudo -u postgres dropdb maxpay_restore_test
 ```
 
-الاستعادة الحقيقية فوق الإنتاج هي ما يطبعه الأمر:
-`pg_restore --clean --if-exists -d <database> <file>` — بعد إيقاف `maxpay`.
+وجرّب الملفات أيضاً، في مجلّد مؤقّت:
+
+```bash
+MEDIA=$(ls -t /srv/maxpay/backups/*-media-*.tar.gz | head -1); echo "$MEDIA"
+mkdir -p /tmp/media-restore && tar -xzf "$MEDIA" -C /tmp/media-restore
+find /tmp/media-restore/private_media -type f | wc -l
+find /srv/maxpay/app/private_media -type f | wc -l     # يجب أن يتساوى العددان
+rm -rf /tmp/media-restore
+```
+
+الاستعادة الحقيقية فوق الإنتاج هي ما يطبعه الأمر — بعد إيقاف `maxpay`:
+`pg_restore --clean --if-exists -d <database> <file>`، ثم
+`tar -xzf <media-file> -C /srv/maxpay/app`.
 
 ---
 
@@ -740,6 +759,7 @@ dj check --deploy --database default
 - [ ] `dj check --deploy --database default` نظيف تماماً
 - [ ] `systemctl status maxpay` و`redis-server` و`postgresql` كلها `active`
 - [ ] `ufw status`: 80 و443 للعموم، 22 لعنوانك وحده؛ 5432 و6379 على `127.0.0.1` فقط
+- [ ] `TRUSTED_PROXY_COUNT=1`: سجلات الدخول في لوحة التدقيق تُظهر عناوين العملاء، لا عنوان nginx
 - [ ] `https://YOUR_DOMAIN` بشهادة صالحة، و`certbot renew --dry-run` ناجح
 - [ ] `/static/` يُخدم، و`private_media/` **لا** يُخدم من أي عنوان
 
@@ -771,7 +791,7 @@ dj check --deploy --database default
 **النسخ**
 
 - [ ] نسخة يومية مجدولة (`list-timers`) إلى قرص غير قرص القاعدة
-- [ ] نسخ `private_media/` مجدول
+- [ ] كل نسخة لها أرشيف `-media-` بجانبها
 - [ ] نقل خارج الخادم وتشفير محسومان ومفعّلان
 - [ ] §8.4: **استعادة فعلية جرت**، بتاريخ وأعداد مسجّلة
 
@@ -786,7 +806,7 @@ dj check --deploy --database default
 | البند | الحالة | المرجع |
 | --- | --- | --- |
 | **PostgreSQL** | لم يُشغَّل عليه سطر قط قبل §3 من هذا الدليل. مُشغِّلات `plpgsql` لسجل التدقيق والقيود الجزئية لم تُنفَّذ على المحرّك الحقيقي | `STATUS.md` B3، §2.3 |
-| **مكدّس التشغيل** | gunicorn وnginx وsystemd **لم تُشغَّل مع المشروع مرّة**. لا Dockerfile. gunicorn ليس في `requirements.txt`. كل ما في §6 مكتوب من الإعدادات، لا من تشغيل سابق | `STATUS.md` B4 |
+| **مكدّس التشغيل** | gunicorn وnginx وsystemd **لم تُشغَّل مع المشروع مرّة**. لا Dockerfile. gunicorn مثبَّت في `requirements.txt` لكنه لم يُقلِع مرّة. كل ما في §6 مكتوب من الإعدادات، لا من تشغيل سابق | `STATUS.md` B4 |
 | **B2CORE الحقيقي** | لم يجرِ `postMessage` واحد بين الإطار وبوابة B2CORE حقيقية. كل اختبارات المصافحة مقابل مضيف مُقلَّد في `node:vm`، وجلب JWKS مُزيَّف في المجموعة. شكل غلاف الرسالة ما يزال متسامحاً عمداً (`type\|event\|action\|name`) | `STATUS.md` §2.3، B12 |
 | **داخل إطار حقيقي** | زر النسخ (`clipboard-write`)، ارتفاع الإطار على طلب طويل، لوحة المفاتيح الرقمية على الهاتف، والثيم القادم من المضيف | `STATUS.md` B12 |
 | **استطلاع اللوحتين** | `panel.js` لم يُتحقَّق منه في متصفّح | `STATUS.md` §2.3 |

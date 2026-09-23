@@ -29,6 +29,12 @@ python manage.py runserver
 Open `http://127.0.0.1:8000/`. The first login walks you through enrolling an
 authenticator app — there is no way past it (see *Two-factor* below).
 
+`manage.py` **refuses to run without `DJANGO_SETTINGS_MODULE`**. `.env.example`
+names `config.settings.dev`, so a `.env` copied from it just works; a server's
+`.env` must name `config.settings.prod`. It used to fall back to dev silently,
+which on a server meant `migrate` against production with `DEBUG` on. The one
+unnamed way to dev is `MAXPAY_LOCAL_DEV=true`, for a laptop and nowhere else.
+
 ### Trying it in a browser
 
 ```bash
@@ -98,6 +104,13 @@ the word `reset` to be typed; `--no-input` skips the prompt for scripts. Like
 `seed_demo` it **refuses to run unless `DEBUG` is on**, and for the mirror-image
 reason: that one creates accounts with known passwords, this one deletes a
 merchant network and an audit log.
+
+DEBUG is one wrong line in `.env` away from being on where it must not be, so
+two more guards stand behind it and neither reads DEBUG: it **refuses
+PostgreSQL** outright — that is the production engine, and the demo runs on
+SQLite — and it **refuses without `ALLOW_DEMO_RESET=true`**, off by default. Put
+that line in a laptop's `.env` to use it. On PostgreSQL its tests skip, and
+`SecondGuardTests` proves the refusal on every engine instead.
 
 The audit log is append-only in the database (spec §11), so clearing it means
 dropping those triggers and putting them back. The command calls the migration's
@@ -2967,8 +2980,12 @@ neither is closed.
 - **The rate limiters are cost ceilings, not security controls.** Both the
   portal's submission limiter and the login lockout are fixed windows in the
   cache, and both fail *open* if the cache is down — a broken limiter must not
-  take client submissions or the desk offline with it. Behind a proxy the
-  portal's is only as good as `X-Forwarded-For`. And with `LocMemCache` neither
+  take client submissions or the desk offline with it. Behind a proxy both are
+  only as good as `TRUSTED_PROXY_COUNT`: `X-Forwarded-For` is read from the
+  right by that many hops and ignored entirely at the default of 0, so a caller
+  can no longer name their own address — but a count set too high trusts a hop
+  the caller wrote, and one left at 0 behind nginx counts every client as
+  nginx. And with `LocMemCache` neither
   is shared between workers, which is why `core.W010` exists.
 - **No penetration test has been run.** Spec §11's last line, and the one item
   on it that no amount of code closes. Same for "restore tested before
