@@ -26,6 +26,16 @@ a laptop; this one deletes a merchant network and an audit log, which is only
 safe in the same place. The guard is the first thing either does, before it
 reads a single argument.
 
+**And DEBUG is not enough on its own.** It is one wrong line in ``.env`` away
+from being on where it must not be, so two more guards stand behind it, neither
+of which reads DEBUG:
+
+* **Not on PostgreSQL, ever.** PostgreSQL is what production runs; the demo
+  runs on SQLite. A reset that finds itself on PostgreSQL is on the wrong
+  database, whatever else the settings say.
+* **Not without ``ALLOW_DEMO_RESET=true``,** set by name. Off by default, and
+  nothing else turns it on.
+
 **The audit log is append-only in the database** (spec §11), by triggers that
 refuse ``UPDATE``, ``DELETE`` and — on PostgreSQL — ``TRUNCATE``. Clearing it
 therefore means dropping those triggers and putting them back, which this does
@@ -131,7 +141,8 @@ def kept_models():
 class Command(BaseCommand):
     help = (
         "Clear demo requests and the merchant network, keeping internal users, "
-        "their 2FA and the exchange rates. Refuses to run unless DEBUG."
+        "their 2FA and the exchange rates. Refuses unless DEBUG and "
+        "ALLOW_DEMO_RESET=true, and always on PostgreSQL."
     )
 
     def add_arguments(self, parser):
@@ -160,6 +171,19 @@ class Command(BaseCommand):
                 "reset_demo refuses to run with DEBUG off. It deletes requests, "
                 "a merchant network and the audit log; that is only ever "
                 "acceptable on a development machine."
+            )
+        # Independent of DEBUG on purpose: each of these holds when DEBUG has
+        # been switched on somewhere it should not have been.
+        if connection.vendor == "postgresql":
+            raise CommandError(
+                "reset_demo refuses to run on PostgreSQL. That is the production "
+                "engine; the demo runs on SQLite. Whatever DEBUG says, a reset "
+                "that finds itself here is pointed at the wrong database."
+            )
+        if not getattr(settings, "ALLOW_DEMO_RESET", False):
+            raise CommandError(
+                "reset_demo refuses to run without ALLOW_DEMO_RESET=true. Set it "
+                "in the .env of a development machine, and nowhere else."
             )
 
         keep_merchants = options["keep_merchants"]

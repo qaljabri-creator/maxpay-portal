@@ -10,6 +10,7 @@ and anything that takes a guarantee off has to be proven to put it back.
 from datetime import time as clock_time
 from decimal import Decimal
 from io import StringIO
+from unittest import mock, skipIf
 
 from django.contrib.auth.models import Group
 from django.core.management import call_command
@@ -34,6 +35,20 @@ from apps.transactions.models import (
     RequestStatus,
     RequestType,
 )
+
+
+def runs_a_reset(target):
+    """Both keys turned, and only where the command agrees to run at all.
+
+    The command refuses PostgreSQL outright, so on PostgreSQL there is no reset
+    to test — only the refusal, which :class:`SecondGuardTests` covers on every
+    engine by telling the command it is on one.
+    """
+    target = override_settings(DEBUG=True, ALLOW_DEMO_RESET=True)(target)
+    return skipIf(
+        connection.vendor == "postgresql",
+        "reset_demo refuses PostgreSQL; its refusal is tested in SecondGuardTests.",
+    )(target)
 
 
 class ResetDemoTestCase(TestCase):
@@ -154,11 +169,49 @@ class DebugGuardTests(ResetDemoTestCase):
         self.assertIn("deletes", message)
         self.assertIn("development machine", message)
 
-    @override_settings(DEBUG=True)
+    @runs_a_reset
     def test_it_runs_with_debug_on(self):
         self.reset()
 
         self.assertEqual(Request.objects.count(), 0)
+
+
+class SecondGuardTests(ResetDemoTestCase):
+    """Two refusals that do not read DEBUG, because DEBUG is the thing that
+    might be wrong. Each is tested with DEBUG *on*: that is the case they exist
+    for."""
+
+    def assert_refused_and_untouched(self, needle):
+        with self.assertRaises(CommandError) as caught:
+            self.reset()
+        self.assertIn(needle, str(caught.exception))
+        self.assertEqual(Request.objects.count(), 1)
+        self.assertEqual(Merchant.objects.count(), 1)
+        self.assertEqual(AuditLog.objects.count(), 1)
+
+    @override_settings(DEBUG=True, ALLOW_DEMO_RESET=False)
+    def test_debug_alone_is_not_enough(self):
+        self.assert_refused_and_untouched("ALLOW_DEMO_RESET=true")
+
+    @override_settings(DEBUG=True)
+    def test_the_flag_is_off_unless_somebody_sets_it(self):
+        from django.conf import settings
+
+        self.assertFalse(settings.ALLOW_DEMO_RESET)
+        self.assert_refused_and_untouched("ALLOW_DEMO_RESET=true")
+
+    @override_settings(DEBUG=True, ALLOW_DEMO_RESET=True)
+    def test_postgresql_is_refused_even_with_both_keys(self):
+        with mock.patch.object(connection, "vendor", "postgresql"):
+            self.assert_refused_and_untouched("PostgreSQL")
+
+    @override_settings(DEBUG=True, ALLOW_DEMO_RESET=True)
+    def test_postgresql_is_refused_before_the_flag_is_even_read(self):
+        """The engine is checked first: the flag cannot argue with it."""
+        with mock.patch.object(connection, "vendor", "postgresql"):
+            with self.assertRaises(CommandError) as caught:
+                self.reset(keep_merchants=True)
+        self.assertNotIn("ALLOW_DEMO_RESET", str(caught.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +219,7 @@ class DebugGuardTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class FullResetTests(ResetDemoTestCase):
     def test_it_clears_the_traffic(self):
         self.reset()
@@ -200,7 +253,7 @@ class FullResetTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class KeptTests(ResetDemoTestCase):
     """The reason the command exists rather than `rm dev.sqlite3`."""
 
@@ -255,7 +308,7 @@ class KeptTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class KeepMerchantsTests(ResetDemoTestCase):
     def test_it_clears_the_traffic(self):
         self.reset(keep_merchants=True)
@@ -294,7 +347,7 @@ class KeepMerchantsTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class AuditLogTriggerTests(ResetDemoTestCase):
     def test_the_log_is_undeletable_to_begin_with(self):
         """Establishes that clearing it is a real problem and not a `delete()`.
@@ -348,7 +401,7 @@ class AuditLogTriggerTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class SequenceTests(ResetDemoTestCase):
     def test_the_next_request_starts_from_one_again(self):
         self.assertEqual(Request.objects.get().pk, 1)
@@ -384,7 +437,7 @@ class SequenceTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class PlanTests(ResetDemoTestCase):
     def test_it_prints_what_it_will_delete_and_how_many(self):
         output = self.reset()
@@ -429,7 +482,7 @@ class PlanTests(ResetDemoTestCase):
 # ---------------------------------------------------------------------------
 
 
-@override_settings(DEBUG=True)
+@runs_a_reset
 class ConfirmationTests(ResetDemoTestCase):
     def call(self, answer):
         """Run without --no-input, with ``answer`` standing in for the operator."""

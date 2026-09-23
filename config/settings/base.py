@@ -601,6 +601,29 @@ BACKUP_RETENTION_DAYS = env_int("BACKUP_RETENTION_DAYS", default=14)
 BACKUP_TIMEOUT_SECONDS = env_int("BACKUP_TIMEOUT_SECONDS", default=60 * 30)
 
 
+# --------------------------------------------------------------------------
+# Demo tooling
+# --------------------------------------------------------------------------
+
+#: ``reset_demo`` deletes requests, a merchant network and the audit log. DEBUG
+#: alone was its only guard, and DEBUG is one wrong line in ``.env`` away from
+#: being on in the wrong place. This is a second key, asked for by name and off
+#: unless somebody writes it down. The command also refuses PostgreSQL outright.
+ALLOW_DEMO_RESET = env_bool("ALLOW_DEMO_RESET", default=False)
+
+
+# --------------------------------------------------------------------------
+# Reverse proxies
+# --------------------------------------------------------------------------
+
+#: How many reverse proxies in front of the app append to ``X-Forwarded-For``.
+#: Zero — the default — means none is trusted and ``REMOTE_ADDR`` is the
+#: client. With N, the client is the N-th address from the *right*: every
+#: address to the left of that was written by whoever sent the request, and so
+#: is whatever they wanted it to be. See ``apps.core.services.client_ip``.
+TRUSTED_PROXY_COUNT = env_int("TRUSTED_PROXY_COUNT", default=0)
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -32,3 +32,9 @@ cryptography==50.0.0
 # Django ships the Redis *backend*, but not the client it drives; without this
 # a REDIS_URL only trades core.W010 for an ImportError on the first request.
 redis==8.1.0
+
+# The WSGI server (TAHA.md §6). Pinned so every deploy runs the same one; it
+# has no required dependencies of its own. Linux only — it will not start on
+# Windows, so it has not been run against this project on the development
+# machine, only resolved: the first gunicorn start is on the VPS.
+gunicorn==26.2.0

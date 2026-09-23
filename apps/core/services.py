@@ -5,10 +5,12 @@ through :func:`record_audit` (spec §5). Keeping it in one place means the
 serialisation of ``before``/``after`` is consistent and the log stays queryable.
 """
 
+import ipaddress
 import logging
 from decimal import Decimal
 from typing import Any
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -56,19 +58,42 @@ def snapshot(instance: models.Model, fields: list[str] | None = None) -> dict:
 
 
 def client_ip(request) -> str | None:
-    """Best-effort client IP.
+    """The caller's address, believing only as many proxies as we run.
 
-    ``X-Forwarded-For`` is only consulted because the app runs behind a known
-    reverse proxy; the left-most entry is taken.
+    ``X-Forwarded-For`` is a list each proxy *appends* to, so only its right
+    end was written by somebody we trust. It used to take the left-most entry —
+    the one the caller writes — which let anybody choose their own address and
+    walk straight past the login lockout and the portal's rate limit, both of
+    which count per address.
+
+    ``TRUSTED_PROXY_COUNT`` says how many proxies stand in front of the app.
+    Zero (the default) trusts none: the header is ignored and ``REMOTE_ADDR``
+    is the client. With N, the client is the N-th entry from the right. A
+    header too short to hold N entries, or whose entry there is not an address,
+    did not come through the proxies we were told about, and ``REMOTE_ADDR``
+    is used instead.
     """
     if request is None:
         return None
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if forwarded:
-        candidate = forwarded.split(",")[0].strip()
-        if candidate:
-            return candidate
-    return request.META.get("REMOTE_ADDR") or None
+    remote = request.META.get("REMOTE_ADDR") or None
+
+    trusted = max(int(getattr(settings, "TRUSTED_PROXY_COUNT", 0) or 0), 0)
+    if trusted == 0:
+        return remote
+
+    hops = [
+        hop.strip()
+        for hop in request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")
+        if hop.strip()
+    ]
+    if len(hops) < trusted:
+        return remote
+    candidate = hops[-trusted]
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return remote
+    return candidate
 
 
 def record_audit(
