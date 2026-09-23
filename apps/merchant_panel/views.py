@@ -41,6 +41,7 @@ from apps.transactions.services import (
     TransitionError,
     correct_amount,
     get_transition,
+    merchant_may_correct,
 )
 
 from . import actions, scoping
@@ -250,6 +251,7 @@ class MerchantRequestDetailView(MerchantPanelMixin, TemplateView):
         context["amount_form"] = (
             AmountCorrectionForm(prefix="amount")
             if self.request.user.has_perm("transactions.change_request_amount")
+            and merchant_may_correct(request_obj)
             and request_obj.status in AMOUNT_EDITABLE_STATUSES
             else None
         )
@@ -400,7 +402,8 @@ class MerchantAmountCorrectionView(MerchantPanelMixin, View):
     """The merchant correcting a request to what actually arrived.
 
     Finance asked for this on both desks by name, and the merchant is the one
-    who watches the money land. The rules — who may, when, and what the other
+    who watches the money land — on a deposit. A withdrawal's amount is
+    Finance's alone (Finance manager, Sep 2026), so this route refuses one. The rules — who may, when, and what the other
     three figures become — are
     :func:`apps.transactions.services.correct_amount`, the same function the
     Finance panel calls. Nothing about the arithmetic is decided here.
@@ -412,6 +415,11 @@ class MerchantAmountCorrectionView(MerchantPanelMixin, View):
         req = scoping.request_or_none(self.merchant, reference)
         if req is None:
             raise Http404("No such request for this merchant.")
+        if not merchant_may_correct(req):
+            # Refused before the form is even read, so the route is shut for a
+            # withdrawal and not merely missing its button. correct_amount()
+            # refuses it again, for any caller that does not come through here.
+            raise PermissionDenied(_("تعديل مبلغ طلب السحب من صلاحيات المالية فقط."))
 
         detail_url = reverse("merchant_panel:request_detail", args=[reference])
         form = AmountCorrectionForm(request.POST, prefix="amount")

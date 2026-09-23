@@ -609,6 +609,19 @@ def apply_transition(
 #: one over there. A correction after that is a Back Office correction first.
 AMOUNT_EDITABLE_STATUSES = frozenset(OPEN_STATUSES - {RequestStatus.CREDITED})
 
+#: Which directions a *merchant* may correct (Finance manager, Sep 2026). A
+#: deposit's merchant is the one watching the money land, so the correction is
+#: theirs to make; a withdrawal's merchant pays out a figure Finance already
+#: settled against the client's B2CORE debit, and is not to change it. Finance
+#: keeps both directions. Not a permission, because the merchant role still
+#: needs ``change_request_amount`` for deposits — this is the per-type rule on
+#: top of it, and :func:`correct_amount` is where it is enforced.
+MERCHANT_AMOUNT_TYPES = frozenset({RequestType.DEPOSIT})
+
+
+def merchant_may_correct(request_obj) -> bool:
+    return request_obj.type in MERCHANT_AMOUNT_TYPES
+
 #: What an amount correction records, before and after.
 AMOUNT_FIELDS = [
     "public_ref",
@@ -646,8 +659,8 @@ def correct_amount(
     the commission is re-prorated from the same row, because a commission
     charged on $100 when $60 arrived is not the commission that rate defines.
 
-    Who may do it: Finance, and the merchant the request is routed to. Both
-    were asked for by name. Every edit is audited with the old value, the new
+    Who may do it: Finance in both directions, and the merchant the request is
+    routed to on a deposit only (see :data:`MERCHANT_AMOUNT_TYPES`). Every edit is audited with the old value, the new
     value, who and when, and the request carries the last of those on its face.
     """
     from apps.portal import pricing
@@ -667,6 +680,10 @@ def correct_amount(
 
     if role in MERCHANT_ROLES and not merchant_holds(locked, actor):
         raise TransitionError(_("هذا الطلب ليس مُسندًا إليك."), code="not_assigned")
+    if role in MERCHANT_ROLES and not merchant_may_correct(locked):
+        raise TransitionError(
+            _("تعديل مبلغ طلب السحب من صلاحيات المالية فقط."), code="wrong_type"
+        )
     if locked.status not in AMOUNT_EDITABLE_STATUSES:
         raise TransitionError(
             _("لا يمكن تعديل المبلغ بعد أن أصبح الطلب «%(status)s».")

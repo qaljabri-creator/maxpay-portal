@@ -100,6 +100,20 @@ class AmountTestCase(TestCase):
         defaults.update(overrides)
         return Request.objects.create(**defaults)
 
+    def make_withdrawal(self, **overrides) -> Request:
+        ExchangeRate.objects.create(
+            rate_type=RateType.WITHDRAWAL,
+            iqd_per_usd=RATE,
+            commission_iqd_per_100usd=FEE_PER_100,
+        )
+        return self.make_request(
+            type=RequestType.WITHDRAWAL,
+            destination_account="4257880011937742",
+            wallet_number_snapshot="",
+            amount_iqd=Decimal("142000.00"),
+            **overrides,
+        )
+
 
 # ---------------------------------------------------------------------------
 # 3.1 — the arithmetic
@@ -251,6 +265,24 @@ class CorrectionAccessTests(AmountTestCase):
         """They are the one who watches the money land."""
         self.assertEqual(
             correct_amount(self.deposit, "60", actor=self.merchant_user).amount_usd,
+            Decimal("60.00"),
+        )
+
+    def test_the_merchant_holding_a_withdrawal_may_not(self):
+        """Finance manager, Sep 2026: a withdrawal's amount is Finance's."""
+        withdrawal = self.make_withdrawal()
+
+        with self.assertRaises(TransitionError) as caught:
+            correct_amount(withdrawal, "60", actor=self.merchant_user)
+
+        self.assertEqual(caught.exception.code, "wrong_type")
+        withdrawal.refresh_from_db()
+        self.assertEqual(withdrawal.amount_usd, Decimal("100.00"))
+
+    def test_finance_still_may_correct_a_withdrawal(self):
+        withdrawal = self.make_withdrawal()
+        self.assertEqual(
+            correct_amount(withdrawal, "60", actor=self.admin).amount_usd,
             Decimal("60.00"),
         )
 
@@ -479,6 +511,57 @@ class CorrectionEndpointTests(AmountTestCase):
         self.assertEqual(
             Request.objects.get(pk=self.deposit.pk).amount_usd, Decimal("100.00")
         )
+
+    def test_the_merchant_route_is_shut_for_a_withdrawal(self):
+        """Refused at the endpoint, not just missing its button: somebody who
+        knows the URL gets a 403 and the amount does not move."""
+        withdrawal = self.make_withdrawal()
+        verify_otp(self.client, self.merchant_user)
+
+        response = self.client.post(
+            reverse("merchant_panel:request_amount", args=[withdrawal.public_ref]),
+            {"amount-amount_usd": "60"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            Request.objects.get(pk=withdrawal.pk).amount_usd, Decimal("100.00")
+        )
+
+    def test_finance_can_still_correct_a_withdrawal_from_the_panel(self):
+        withdrawal = self.make_withdrawal()
+        verify_otp(self.client, self.admin)
+
+        response = self.client.post(
+            reverse("finance:request_amount", args=[withdrawal.public_ref]),
+            {"amount-amount_usd": "60", "amount-reason": "حُوّل 60"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            Request.objects.get(pk=withdrawal.pk).amount_usd, Decimal("60.00")
+        )
+
+    def test_the_merchant_sees_the_form_on_a_deposit_only(self):
+        withdrawal = self.make_withdrawal()
+        verify_otp(self.client, self.merchant_user)
+
+        for request_obj, offered in ((self.deposit, True), (withdrawal, False)):
+            with self.subTest(type=request_obj.type):
+                response = self.client.get(
+                    reverse(
+                        "merchant_panel:request_detail", args=[request_obj.public_ref]
+                    )
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["amount_form"] is not None, offered)
+                url = reverse(
+                    "merchant_panel:request_amount", args=[request_obj.public_ref]
+                )
+                if offered:
+                    self.assertContains(response, url)
+                else:
+                    self.assertNotContains(response, url)
 
     def test_the_correction_endpoint_refuses_a_get(self):
         verify_otp(self.client, self.admin)
