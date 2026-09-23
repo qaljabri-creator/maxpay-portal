@@ -79,6 +79,27 @@ def steps_for(request_type: str) -> list[tuple[str, str, str | None]]:
     return DEPOSIT_STEPS if request_type == RequestType.DEPOSIT else WITHDRAWAL_STEPS
 
 
+#: The statuses whose pill reads as their timeline step rather than as the
+#: internal status name ("قُيِّد في B2CORE", "مغلق"). Only the two the client's
+#: timeline merges, so the pill and the last step always agree.
+TIMELINE_LABELLED = frozenset({RequestStatus.CREDITED, RequestStatus.CLOSED})
+
+
+def status_label(deposit: Request) -> str:
+    """The status as the client is told it. Display only, like the timeline.
+
+    Taken from the timeline step rather than written a second time, so a
+    deposit says "أُضيف المبلغ إلى حسابك" and a withdrawal — whose money went
+    the other way — says its own last step, "اكتمل الطلب".
+    """
+    if deposit.status in TIMELINE_LABELLED:
+        status = CLIENT_STEP_OF.get(deposit.status, deposit.status)
+        for step, label, _field in steps_for(deposit.type):
+            if step == status:
+                return str(_(label))
+    return str(deposit.get_status_display())
+
+
 def _iso(value):
     return value.isoformat() if value else None
 
@@ -181,7 +202,7 @@ def summary_payload(deposit: Request) -> dict:
         "type": deposit.type,
         "type_label": str(deposit.get_type_display()),
         "status": deposit.status,
-        "status_label": str(deposit.get_status_display()),
+        "status_label": status_label(deposit),
         "is_closed": deposit.is_closed,
         "amount_usd": f"{deposit.amount_usd:.2f}",
         "amount_iqd": f"{deposit.amount_iqd:.2f}",

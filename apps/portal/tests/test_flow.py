@@ -1656,6 +1656,39 @@ class RequestViewTests(FlowTestCase):
         self.assertEqual(len(references), 1)
         self.assertNotIn(mine, references)
 
+    def test_the_history_pill_reads_as_the_timeline_does(self):
+        """Credited and closed are one pill, worded as the merged timeline step,
+        never the internal "قُيِّد في B2CORE" or "مغلق"."""
+        for status in (RequestStatus.CREDITED, RequestStatus.CLOSED):
+            with self.subTest(status=status):
+                self.deposit.status = status
+                self.deposit.save(update_fields=["status"])
+
+                row = self.body(self.client.get(self.requests_url))["requests"][0]
+                detail = self.body(self.client.get(self.detail_url))["request"]
+
+                self.assertEqual(row["status_label"], "أُضيف المبلغ إلى حسابك")
+                self.assertEqual(detail["status_label"], row["status_label"])
+                self.assertEqual(detail["status_label"], detail["timeline"][-1]["label"])
+                # The status itself is untouched; only its wording is.
+                self.assertEqual(row["status"], status)
+
+    def test_a_closed_withdrawal_is_not_told_money_was_added(self):
+        """The money went the other way, so it reads as its own last step."""
+        from apps.portal.payloads import status_label
+
+        self.deposit.type = RequestType.WITHDRAWAL
+        self.deposit.status = RequestStatus.CLOSED
+        self.assertEqual(status_label(self.deposit), "اكتمل الطلب")
+
+    def test_other_statuses_keep_their_label(self):
+        from apps.portal.payloads import status_label
+
+        self.deposit.status = RequestStatus.REJECTED
+        self.assertEqual(
+            status_label(self.deposit), RequestStatus.REJECTED.label
+        )
+
     def test_a_malformed_reference_never_reaches_a_view(self):
         response = self.client.get("/portal/requests/not-a-reference/")
 
