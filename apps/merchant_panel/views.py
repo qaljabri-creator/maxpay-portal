@@ -371,6 +371,12 @@ class MerchantActionView(MerchantPanelMixin, View):
             return redirect(detail_url)
 
         messages.success(request, self._confirmation(updated.public_ref, action))
+        if action == "reject" or move.clears_merchant:
+            # Back to the queue, not the request. A handback takes the request
+            # out of this merchant's scope altogether, so its detail page is a
+            # 404 the moment the move lands; a rejection leaves nothing to do
+            # there. Either way the merchant's next job is in the queue.
+            return redirect("merchant_panel:queue")
         return redirect(detail_url)
 
     @staticmethod
@@ -382,6 +388,8 @@ class MerchantActionView(MerchantPanelMixin, View):
             return _("سُجّل تحويل %(ref)s مع الإثبات. أُبلغت المالية.") % {"ref": reference}
         if action == "reject":
             return _("رُفض %(ref)s ونُشر السبب في المحادثة.") % {"ref": reference}
+        if action == "hand_back":
+            return _("أُعيد %(ref)s إلى المالية وخرج من قائمتك.") % {"ref": reference}
         return _("حُدّث %(ref)s.") % {"ref": reference}
 
 

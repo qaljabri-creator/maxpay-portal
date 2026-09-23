@@ -212,6 +212,39 @@ class ActionTests(MerchantPanelTestCase):
             self.request_obj.messages.filter(sender_role=ActorRole.MERCHANT).count(), 1
         )
 
+    def test_rejecting_returns_the_merchant_to_their_queue(self):
+        response = self.act("reject", **{"reject-reason": "لم يصل المبلغ إلى المحفظة."})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.redirect_chain, [(reverse("merchant_panel:queue"), 302)]
+        )
+        self.assertContains(response, f"رُفض {self.request_obj.public_ref}")
+
+    def test_handing_back_returns_to_the_queue_and_not_to_a_404(self):
+        """The handback clears ``merchant_assigned``, so the request's own page
+        stops existing for this merchant the moment the move lands. Sending
+        them there was a 404 after a move that had in fact succeeded."""
+        response = self.act("hand_back", **{"hand_back-reason": "لا سيولة اليوم."})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.redirect_chain, [(reverse("merchant_panel:queue"), 302)]
+        )
+        self.assertContains(response, f"أُعيد {self.request_obj.public_ref} إلى المالية")
+        self.request_obj.refresh_from_db()
+        self.assertEqual(self.request_obj.status, RequestStatus.PENDING)
+        self.assertIsNone(self.request_obj.merchant_assigned_id)
+
+    def test_confirming_stays_on_the_request(self):
+        """A move that leaves the request with the merchant keeps them on it."""
+        response = self.act("confirm")
+        self.assertEqual(response.redirect_chain, [(self.detail_url, 302)])
+
+    def test_a_refused_rejection_stays_on_the_request_to_show_why(self):
+        response = self.act("reject", **{"reject-reason": ""})
+        self.assertEqual(response.redirect_chain, [(self.detail_url, 302)])
+
     def test_a_merchant_cannot_act_on_somebody_elses_request(self):
         theirs = self.make_request(assigned_to=self.other)
         response = self.act("confirm", request_obj=theirs)
